@@ -223,10 +223,9 @@ namespace DocuLint
             {
             }
 
-            ApplyCaptionStyleAndCenterToParagraph(GetHostParagraph(insertRange));
-
             Word.Range endRange = (sequenceField.Result ?? fieldInsertRange).Duplicate;
             endRange.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
+            ApplyInsertedCaptionFormatting(selection.Document.Range(insertRange.Start, endRange.End));
             endRange.Select();
         }
 
@@ -261,24 +260,24 @@ namespace DocuLint
             {
             }
 
-            ApplyCaptionStyleAndCenterToParagraph(GetHostParagraph(insertRange));
-
             Word.Range endRange = (sequenceField.Result ?? fieldInsertRange).Duplicate;
             endRange.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
+            ApplyInsertedCaptionFormatting(selection.Document.Range(insertRange.Start, endRange.End));
             endRange.Select();
         }
 
-        private static void ApplyCaptionStyleAndCenterToParagraph(Word.Paragraph paragraph)
+        private static void ApplyInsertedCaptionFormatting(Word.Range captionRange)
         {
-            if (paragraph?.Range == null)
+            if (captionRange == null)
             {
                 return;
             }
 
             try
             {
-                object styleValue = "题注";
-                paragraph.Range.set_Style(ref styleValue);
+                captionRange.Font.NameFarEast = "黑体";
+                captionRange.Font.Name = "黑体";
+                captionRange.Font.Size = 12f;
             }
             catch
             {
@@ -286,7 +285,7 @@ namespace DocuLint
 
             try
             {
-                paragraph.Range.ParagraphFormat.Alignment = Word.WdParagraphAlignment.wdAlignParagraphCenter;
+                captionRange.ParagraphFormat.Alignment = Word.WdParagraphAlignment.wdAlignParagraphCenter;
             }
             catch
             {

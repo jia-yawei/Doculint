@@ -353,6 +353,9 @@
     <Compile Include="Features\Outline\OutlineProgressForm.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="Features\Styles\CommonStyleSettingsForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Features\Outline\OutlineRibbonActions.cs">
       <SubType>Component</SubType>
     </Compile>

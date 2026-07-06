@@ -36,6 +36,7 @@
         {
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Ribbon1));
             Microsoft.Office.Tools.Ribbon.RibbonDialogLauncher ribbonDialogLauncherImpl1 = this.Factory.CreateRibbonDialogLauncher();
+            Microsoft.Office.Tools.Ribbon.RibbonDialogLauncher ribbonDialogLauncherImpl2 = this.Factory.CreateRibbonDialogLauncher();
             this.tab1 = this.Factory.CreateRibbonTab();
             this.group4 = this.Factory.CreateRibbonGroup();
             this.splitButton1 = this.Factory.CreateRibbonSplitButton();
@@ -52,6 +53,8 @@
             this.btnStyle3 = this.Factory.CreateRibbonToggleButton();
             this.btnStyle4 = this.Factory.CreateRibbonToggleButton();
             this.btnStyle5 = this.Factory.CreateRibbonToggleButton();
+            this.btnStyle6 = this.Factory.CreateRibbonToggleButton();
+            this.btnStyleBody = this.Factory.CreateRibbonToggleButton();
             this.group2 = this.Factory.CreateRibbonGroup();
             this.splitButton2 = this.Factory.CreateRibbonSplitButton();
             this.button22 = this.Factory.CreateRibbonButton();
@@ -191,6 +194,10 @@
             this.group1.Items.Add(this.btnStyle3);
             this.group1.Items.Add(this.btnStyle4);
             this.group1.Items.Add(this.btnStyle5);
+            this.group1.Items.Add(this.btnStyle6);
+            this.group1.Items.Add(this.btnStyleBody);
+            this.group1.Items.Add(this.btnRebuildOutlineList);
+            this.group1.DialogLauncher = ribbonDialogLauncherImpl2;
             this.group1.Label = "常用样式库";
             this.group1.Name = "group1";
             this.group1.DialogLauncherClick += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.group1_DialogLauncherClick);
@@ -198,7 +205,7 @@
             // btnStyle1
             // 
             this.btnStyle1.Image = ((System.Drawing.Image)(resources.GetObject("btnStyle1.Image")));
-            this.btnStyle1.Label = "样式1";
+            this.btnStyle1.Label = "一级标题";
             this.btnStyle1.Name = "btnStyle1";
             this.btnStyle1.ShowImage = true;
             this.btnStyle1.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnStyle1_Click_1);
@@ -206,7 +213,7 @@
             // btnStyle2
             // 
             this.btnStyle2.Image = ((System.Drawing.Image)(resources.GetObject("btnStyle2.Image")));
-            this.btnStyle2.Label = "样式2";
+            this.btnStyle2.Label = "二级标题";
             this.btnStyle2.Name = "btnStyle2";
             this.btnStyle2.ShowImage = true;
             this.btnStyle2.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnStyle2_Click_1);
@@ -214,7 +221,7 @@
             // btnStyle3
             // 
             this.btnStyle3.Image = ((System.Drawing.Image)(resources.GetObject("btnStyle3.Image")));
-            this.btnStyle3.Label = "样式3";
+            this.btnStyle3.Label = "三级标题";
             this.btnStyle3.Name = "btnStyle3";
             this.btnStyle3.ShowImage = true;
             this.btnStyle3.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnStyle3_Click_1);
@@ -222,7 +229,7 @@
             // btnStyle4
             // 
             this.btnStyle4.Image = ((System.Drawing.Image)(resources.GetObject("btnStyle4.Image")));
-            this.btnStyle4.Label = "样式4";
+            this.btnStyle4.Label = "四级标题";
             this.btnStyle4.Name = "btnStyle4";
             this.btnStyle4.ShowImage = true;
             this.btnStyle4.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnStyle4_Click_1);
@@ -230,10 +237,22 @@
             // btnStyle5
             // 
             this.btnStyle5.Image = ((System.Drawing.Image)(resources.GetObject("btnStyle5.Image")));
-            this.btnStyle5.Label = "题注";
+            this.btnStyle5.Label = "五级标题";
             this.btnStyle5.Name = "btnStyle5";
             this.btnStyle5.ShowImage = true;
             this.btnStyle5.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnStyle5_Click_1);
+            // 
+            // btnStyle6
+            // 
+            this.btnStyle6.Label = "六级标题";
+            this.btnStyle6.Name = "btnStyle6";
+            this.btnStyle6.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnStyle6_Click);
+            // 
+            // btnStyleBody
+            // 
+            this.btnStyleBody.Label = "正文";
+            this.btnStyleBody.Name = "btnStyleBody";
+            this.btnStyleBody.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnStyleBody_Click);
             // 
             // group2
             // 
@@ -424,7 +443,6 @@
             // 
             this.group6.Items.Add(this.splitButton6);
             this.group6.Items.Add(this.btnTogglePageWhitespace);
-            this.group6.Items.Add(this.btnRebuildOutlineList);
             this.group6.Items.Add(this.button26);
             this.group6.Items.Add(this.button7);
             this.group6.Label = "快速工具";
@@ -470,7 +488,7 @@
             // btnRebuildOutlineList
             // 
             this.btnRebuildOutlineList.Image = ((System.Drawing.Image)(resources.GetObject("btnRebuildOutlineList.Image")));
-            this.btnRebuildOutlineList.Label = "自动章节号";
+            this.btnRebuildOutlineList.Label = "更新全部章节号";
             this.btnRebuildOutlineList.Name = "btnRebuildOutlineList";
             this.btnRebuildOutlineList.ShowImage = true;
             this.btnRebuildOutlineList.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnRebuildOutlineList_Click);
@@ -585,6 +603,8 @@
         internal Microsoft.Office.Tools.Ribbon.RibbonToggleButton btnStyle3;
         internal Microsoft.Office.Tools.Ribbon.RibbonToggleButton btnStyle4;
         internal Microsoft.Office.Tools.Ribbon.RibbonToggleButton btnStyle5;
+        internal Microsoft.Office.Tools.Ribbon.RibbonToggleButton btnStyle6;
+        internal Microsoft.Office.Tools.Ribbon.RibbonToggleButton btnStyleBody;
         internal Microsoft.Office.Tools.Ribbon.RibbonGroup group4;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnBatchReplace;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnRebuildOutlineList;

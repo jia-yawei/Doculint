@@ -3295,7 +3295,7 @@ namespace DocuLint
                     return;
                 }
 
-                // 优先从下表前向前清理换行，兼容 WPS/Word 在表格边界的不同标记行为。
+                // 优先从下表前向前清理换行，避免 Word 表格边界残留空段落。
                 DeleteLineBreaksBeforeRange(lowerTable.Range, 32, upperTable.Range.End);
                 if (lowerTable.Range.Start <= upperTable.Range.End)
                 {

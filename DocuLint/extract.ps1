@@ -1,7 +1,8 @@
-$source = "e:\my_VSTO\DocuLint -forwps\DocuLint\DocuLint\Ribbon\Ribbon1.cs"
-$targetDir = "e:\my_VSTO\DocuLint -forwps\DocuLint\DocuLint\Features\TablesAndFigures"
+$projectRoot = $PSScriptRoot
+$source = Join-Path $projectRoot "DocuLint\Ribbon\Ribbon1.cs"
+$targetDir = Join-Path $projectRoot "DocuLint\Features\TablesAndFigures"
 $target = "$targetDir\TablesAndFiguresRibbonActions.cs"
-$csproj = "e:\my_VSTO\DocuLint -forwps\DocuLint\DocuLint\DocuLint.csproj"
+$csproj = Join-Path $projectRoot "DocuLint\DocuLint.csproj"
 
 mkdir $targetDir -Force
 

@@ -1,15 +1,13 @@
 # DocuLint 工程说明
 
-这个解决方案目前有 4 个项目：
+这个解决方案目前有 3 个项目：
 
 - `DocuLint`
   Word 的 VSTO 插件主工程。只有这个工程直接操作 Word 对象模型。
 - `DocuLint.Host.Abstractions`
-  宿主无关的接口和共享模型，给 Word/WPS 两边共用。
+  Word 插件内部共享的接口和模型。
 - `DocuLint.Core`
   宿主无关的业务逻辑，目前主要放可复用的数据整理逻辑。
-- `DocuLint.WpsAddin`
-  WPS 宿主层脚手架。现在还是“壳”，不是完整实现。
 
 ## 建议阅读顺序
 
@@ -44,7 +42,6 @@
 ## 当前哪些是“在用”的
 
 - Word 插件主流程：在用
-- WPS 插件：脚手架阶段
 - `DocuLint.Core` / `DocuLint.Host.Abstractions`：部分在用，后续会继续承接更多共享逻辑
 
 ## 为什么之前会显得乱
@@ -61,7 +58,7 @@
 
 ## 构建说明
 
-- `DocuLint.Core`、`DocuLint.Host.Abstractions`、`DocuLint.WpsAddin` 可以用 `dotnet build` 验证。
+- `DocuLint.Core`、`DocuLint.Host.Abstractions` 可以用 `dotnet build` 验证。
 - `DocuLint` 这个 Word VSTO 工程不能直接用 `dotnet build`，要用 Visual Studio 或 .NET Framework 版 `MSBuild.exe`。
 
 示例：

@@ -2,5 +2,4 @@
   <Project Path="DocuLint/DocuLint.csproj" Id="5a09b108-f057-4382-ad1f-c7f30eb1cfef" />
   <Project Path="DocuLint.Host.Abstractions/DocuLint.Host.Abstractions.csproj" Id="f6f2c82f-b8ff-4ba6-b7fb-c1fd7f2f5b22" />
   <Project Path="DocuLint.Core/DocuLint.Core.csproj" Id="1f10dd8e-cf08-4a2e-8c0f-12fd34cbf6a7" />
-  <Project Path="DocuLint.WpsAddin/DocuLint.WpsAddin.csproj" Id="d263fbf5-5e27-4f4d-b4ec-c4f0e57596b6" />
 </Solution>

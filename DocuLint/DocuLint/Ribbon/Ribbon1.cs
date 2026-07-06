@@ -60,15 +60,7 @@ namespace DocuLint
             }
         }
 
-        // 定义5个常用样式名称（可直接改这里）
-        private readonly string[] myStyles = new string[]
-        {
-            "1级标题-105模板",
-            "2级标题-105模板",
-            "3级标题-105模板",
-            "正文-105",
-            "题注"
-        };
+        private static CommonStyleSettings commonStyleSettings = CommonStyleSettings.CreateDefault();
 
         // 工具栏加载时：初始化按钮文字 + 刷新样式选中状态
         private void Ribbon1_Load(object sender, RibbonUIEventArgs e)
@@ -85,15 +77,7 @@ namespace DocuLint
             splitButton6.Click += splitButton6_ButtonClick;
             InitializeSplitButtonPrimaryActions();
 
-            // 给5个按钮设置显示文字
-            if (myStyles.Length >= 5)
-            {
-                btnStyle1.Label = myStyles[0];
-                btnStyle2.Label = myStyles[1];
-                btnStyle3.Label = myStyles[2];
-                btnStyle4.Label = myStyles[3];
-                btnStyle5.Label = myStyles[4];
-            }
+            RefreshCommonStyleButtonLabels();
 
             // 刷新按钮高亮状态
             RefreshCurrentStyleIndicator();
@@ -108,11 +92,14 @@ namespace DocuLint
             SetTip(button3, "内容抓取", "将当前选区按原格式抓取到当前文档组。");
             SetTip(button30, "内容注入", "从当前文档组选择抓取内容并注入到光标处。");
 
-            SetTip(btnStyle1, "应用样式", "将当前选区应用为“样式1”。");
-            SetTip(btnStyle2, "应用样式", "将当前选区应用为“样式2”。");
-            SetTip(btnStyle3, "应用样式", "将当前选区应用为“样式3”。");
-            SetTip(btnStyle4, "应用样式", "将当前选区应用为“样式4”。");
-            SetTip(btnStyle5, "应用样式", "将当前选区应用为“题注”样式。");
+            SetTip(btnStyle1, "一级标题", "设置为一级大纲标题，默认黑体小四、左对齐。");
+            SetTip(btnStyle2, "二级标题", "设置为二级大纲标题，默认宋体小四、左对齐。");
+            SetTip(btnStyle3, "三级标题", "设置为三级大纲标题，默认宋体小四、左对齐。");
+            SetTip(btnStyle4, "四级标题", "设置为四级大纲标题，默认宋体小四、左对齐。");
+            SetTip(btnStyle5, "五级标题", "设置为五级大纲标题，默认宋体小四、左对齐。");
+            SetTip(btnStyle6, "六级标题", "设置为六级大纲标题，默认宋体小四、左对齐。");
+            SetTip(btnStyleBody, "正文", "设置为正文，默认宋体小四、左对齐。");
+            SetTip(btnRebuildOutlineList, "更新全部章节号", "按标题样式快速更新全文 1-6 级章节号。");
 
             SetTip(button14, "插入图片题注", "在当前光标位置插入“图+自动编号域”。");
             SetTip(button13, "插入表格题注", "在当前光标位置插入表格题注。");
@@ -227,22 +214,29 @@ namespace DocuLint
         // 刷新：哪个样式被选中，哪个按钮就高亮
         internal void RefreshCurrentStyleIndicator()
         {
-            string currentStyleName = GetCurrentSelectionStyleName();
+            int currentOutlineLevel = GetCurrentSelectionOutlineLevel();
 
-            SetStyleButtonChecked(btnStyle1, currentStyleName, GetStyleName(0));
-            SetStyleButtonChecked(btnStyle2, currentStyleName, GetStyleName(1));
-            SetStyleButtonChecked(btnStyle3, currentStyleName, GetStyleName(2));
-            SetStyleButtonChecked(btnStyle4, currentStyleName, GetStyleName(3));
-            SetStyleButtonChecked(btnStyle5, currentStyleName, GetStyleName(4));
+            SetStyleButtonChecked(btnStyle1, currentOutlineLevel, 1);
+            SetStyleButtonChecked(btnStyle2, currentOutlineLevel, 2);
+            SetStyleButtonChecked(btnStyle3, currentOutlineLevel, 3);
+            SetStyleButtonChecked(btnStyle4, currentOutlineLevel, 4);
+            SetStyleButtonChecked(btnStyle5, currentOutlineLevel, 5);
+            SetStyleButtonChecked(btnStyle6, currentOutlineLevel, 6);
+            SetStyleButtonChecked(btnStyleBody, currentOutlineLevel, 10);
         }
 
-        // 根据编号获取样式名（防止越界报错）
-        private string GetStyleName(int index)
+        private void RefreshCommonStyleButtonLabels()
         {
-            if (index < 0 || index >= myStyles.Length)
-                return string.Empty;
+            List<CommonTextStyleOption> styles = commonStyleSettings.Styles;
+            RibbonToggleButton[] buttons =
+            {
+                btnStyle1, btnStyle2, btnStyle3, btnStyle4, btnStyle5, btnStyle6, btnStyleBody
+            };
 
-            return myStyles[index] ?? string.Empty;
+            for (int i = 0; i < buttons.Length && i < styles.Count; i++)
+            {
+                buttons[i].Label = styles[i].Label;
+            }
         }
 
         // 获取Word当前光标所在段落/选区的样式名称
@@ -310,63 +304,152 @@ namespace DocuLint
             return Convert.ToString(styleObj) ?? string.Empty;
         }
 
-        // 设置按钮高亮：当前样式 = 按钮样式 → 选中
-        private static void SetStyleButtonChecked(RibbonToggleButton button, string currentStyleName, string expectedStyle)
+        private int GetCurrentSelectionOutlineLevel()
         {
-            if (button == null) return;
-
-            button.Checked = !string.IsNullOrWhiteSpace(expectedStyle)
-                && string.Equals(currentStyleName, expectedStyle, StringComparison.OrdinalIgnoreCase);
-        }
-
-        // 给Word选中文字应用指定样式
-        private void ApplyMyStyle(string styleName)
-        {
-            if (string.IsNullOrWhiteSpace(styleName)) return;
-
             try
             {
                 Word.Selection selection = Globals.ThisAddIn.Application?.Selection;
-                Word.Range range = selection?.Range;
-                if (range == null) return;
-
-                bool applied = TrySetStyle(range, styleName);
-                if (!applied)
+                Word.Paragraphs paragraphs = selection?.Range?.Paragraphs;
+                if (paragraphs == null || paragraphs.Count < 1)
                 {
-                    applied = TrySetStyle(selection, styleName);
+                    return 0;
                 }
 
-                if (!applied)
+                Word.WdOutlineLevel level = paragraphs[1].OutlineLevel;
+                if (level >= Word.WdOutlineLevel.wdOutlineLevel1 && level <= Word.WdOutlineLevel.wdOutlineLevel9)
                 {
-                    throw new InvalidOperationException("当前 Word 选区不支持设置该样式。");
+                    return (int)level;
                 }
 
-                RefreshAllStyleIndicators();
+                return 10;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static void SetStyleButtonChecked(RibbonToggleButton button, int currentOutlineLevel, int expectedOutlineLevel)
+        {
+            if (button == null) return;
+
+            button.Checked = currentOutlineLevel == expectedOutlineLevel;
+        }
+
+        private void ApplyCommonTextStyle(int index)
+        {
+            if (index < 0 || index >= commonStyleSettings.Styles.Count) return;
+
+            try
+            {
+                Word.Application app = Globals.ThisAddIn.Application;
+                Word.Selection selection = Globals.ThisAddIn.Application?.Selection;
+                Word.Paragraphs paragraphs = selection?.Range?.Paragraphs;
+                if (paragraphs == null || paragraphs.Count == 0)
+                {
+                    return;
+                }
+
+                using (new WordPerformanceScope(app))
+                {
+                    CommonTextStyleOption option = commonStyleSettings.Styles[index];
+                    List<Word.Paragraph> updatedHeadingParagraphs = new List<Word.Paragraph>();
+                    foreach (Word.Paragraph paragraph in paragraphs)
+                    {
+                        ApplyCommonTextStyle(paragraph, option);
+                        if (option.OutlineLevel >= 1 && option.OutlineLevel <= 6)
+                        {
+                            updatedHeadingParagraphs.Add(paragraph);
+                        }
+                    }
+
+                    AutoUpdateOutlineListForParagraphs(updatedHeadingParagraphs);
+                }
+
+                RefreshCurrentStyleIndicator();
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"应用样式失败: {ex.Message}", "文档不加班");
+                MessageBox.Show($"应用常用样式失败: {ex.Message}", "文档不加班");
+            }
+        }
+
+        private static void ApplyCommonTextStyle(Word.Paragraph paragraph, CommonTextStyleOption option)
+        {
+            if (paragraph?.Range == null || option == null)
+            {
+                return;
+            }
+
+            Word.Range range = paragraph.Range;
+            object styleValue = GetBuiltInStyle(option.OutlineLevel);
+            range.set_Style(ref styleValue);
+            range.Font.NameFarEast = option.FontName;
+            range.Font.Name = option.FontName;
+            range.Font.Size = option.FontSizePoints;
+            range.ParagraphFormat.Alignment = Word.WdParagraphAlignment.wdAlignParagraphLeft;
+            if (option.OutlineLevel >= 1 && option.OutlineLevel <= 6)
+            {
+                range.Font.Bold = 0;
+                range.ParagraphFormat.SpaceBefore = 0f;
+                range.ParagraphFormat.SpaceAfter = 0f;
+                range.ParagraphFormat.LineSpacingRule = Word.WdLineSpacing.wdLineSpaceExactly;
+                range.ParagraphFormat.LineSpacing = 20f;
+            }
+            else
+            {
+                SetFirstLineIndentByChars(range, 2f);
+            }
+
+            paragraph.OutlineLevel = option.OutlineLevel >= 1 && option.OutlineLevel <= 9
+                ? (Word.WdOutlineLevel)option.OutlineLevel
+                : Word.WdOutlineLevel.wdOutlineLevelBodyText;
+        }
+
+        private static void SetFirstLineIndentByChars(Word.Range range, float chars)
+        {
+            try
+            {
+                range.ParagraphFormat.CharacterUnitFirstLineIndent = chars;
+            }
+            catch
+            {
+                range.ParagraphFormat.FirstLineIndent = chars * 12f;
+            }
+        }
+
+        private static object GetBuiltInStyle(int outlineLevel)
+        {
+            switch (outlineLevel)
+            {
+                case 1: return Word.WdBuiltinStyle.wdStyleHeading1;
+                case 2: return Word.WdBuiltinStyle.wdStyleHeading2;
+                case 3: return Word.WdBuiltinStyle.wdStyleHeading3;
+                case 4: return Word.WdBuiltinStyle.wdStyleHeading4;
+                case 5: return Word.WdBuiltinStyle.wdStyleHeading5;
+                case 6: return Word.WdBuiltinStyle.wdStyleHeading6;
+                default: return Word.WdBuiltinStyle.wdStyleNormal;
             }
         }
 
         private void btnStyle1_Click_1(object sender, RibbonControlEventArgs e)
         {
-            ApplyMyStyle(GetStyleName(0));
+            ApplyCommonTextStyle(0);
         }
 
         private void btnStyle2_Click_1(object sender, RibbonControlEventArgs e)
         {
-            ApplyMyStyle(GetStyleName(1));
+            ApplyCommonTextStyle(1);
         }
 
         private void btnStyle3_Click_1(object sender, RibbonControlEventArgs e)
         {
-            ApplyMyStyle(GetStyleName(2));
+            ApplyCommonTextStyle(2);
         }
 
         private void btnStyle4_Click_1(object sender, RibbonControlEventArgs e)
         {
-            ApplyMyStyle(GetStyleName(3));
+            ApplyCommonTextStyle(3);
         }
 
         private void button24_Click(object sender, RibbonControlEventArgs e)
@@ -416,7 +499,17 @@ namespace DocuLint
 
         private void btnStyle5_Click_1(object sender, RibbonControlEventArgs e)
         {
-            ApplyMyStyle(GetStyleName(4));
+            ApplyCommonTextStyle(4);
+        }
+
+        private void btnStyle6_Click(object sender, RibbonControlEventArgs e)
+        {
+            ApplyCommonTextStyle(5);
+        }
+
+        private void btnStyleBody_Click(object sender, RibbonControlEventArgs e)
+        {
+            ApplyCommonTextStyle(6);
         }
 
         private void button2_Click(object sender, RibbonControlEventArgs e)
@@ -636,7 +729,17 @@ namespace DocuLint
 
         private void group1_DialogLauncherClick(object sender, RibbonControlEventArgs e)
         {
+            using (CommonStyleSettingsForm form = new CommonStyleSettingsForm(commonStyleSettings))
+            {
+                if (form.ShowDialog() != DialogResult.OK)
+                {
+                    return;
+                }
 
+                commonStyleSettings = form.Settings ?? CommonStyleSettings.CreateDefault();
+                RefreshCommonStyleButtonLabels();
+                RefreshCurrentStyleIndicator();
+            }
         }
 
         private void button12_Click_1(object sender, RibbonControlEventArgs e)

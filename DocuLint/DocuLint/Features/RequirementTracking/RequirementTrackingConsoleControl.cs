@@ -1039,7 +1039,7 @@ namespace DocuLint
             using (OpenFileDialog dialog = new OpenFileDialog())
             {
                 dialog.Title = "选择 Word 文档";
-                dialog.Filter = "文档文件|*.docx;*.doc;*.docm;*.wps;*.wpt|Word 文档|*.docx;*.doc;*.docm|WPS 文档|*.wps;*.wpt|所有文件|*.*";
+                dialog.Filter = "Word 文档|*.docx;*.doc;*.docm|所有文件|*.*";
                 dialog.FilterIndex = 1;
                 dialog.Multiselect = false;
                 dialog.CheckFileExists = true;

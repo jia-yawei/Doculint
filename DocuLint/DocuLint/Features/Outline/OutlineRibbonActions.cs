@@ -21,8 +21,13 @@ namespace DocuLint
             new Regex(@"^\s*[0-9一二三四五六七八九十百千万零〇壹贰叁肆伍陆柒捌玖拾]+\s*[、:：\-]\s*", RegexOptions.Compiled)
         };
 
-        // 点击【自动章节号】按钮：一键重建多级列表
+        // 点击【更新全部章节号】按钮：一键重建多级列表
         private void btnRebuildOutlineList_Click(object sender, RibbonControlEventArgs e)
+        {
+            ExecuteRebuildOutlineList();
+        }
+
+        private void ExecuteRebuildOutlineList()
         {
             Word.Application app = Globals.ThisAddIn.Application;
             Word.Document doc = app.ActiveDocument;
@@ -35,8 +40,8 @@ namespace DocuLint
             }
 
             DialogResult confirmResult = MessageBox.Show(
-                "请确认已为各级标题设置正确的大纲级别（1-9级）。\r\n\r\n本功能将按大纲级别重建自动章节号，并清理标题前已有的手工章节号。\r\n是否继续？",
-                "自动章节号",
+                "本功能将检查全文中大纲级别为 1-6 级的标题，并重建自动章节号。\r\n是否继续？",
+                "更新全部章节号",
                 MessageBoxButtons.OKCancel,
                 MessageBoxIcon.Question);
             if (confirmResult != DialogResult.OK)
@@ -44,13 +49,13 @@ namespace DocuLint
                 return;
             }
 
-            // 默认设置：处理1-9级标题，清理手动编号，用1.1.1格式
-            HashSet<int> selectedLevels = new HashSet<int> { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+            // 默认设置：处理常用样式库中的1-6级标题。
+            HashSet<int> selectedLevels = new HashSet<int> { 1, 2, 3, 4, 5, 6 };
             OutlineListRebuildOptions defaultOptions = new OutlineListRebuildOptions
             {
                 SelectedLevels = selectedLevels,
                 ClearManualNumbering = true,
-                NumberPattern = OutlineNumberPattern.Decimal,
+                NumberPattern = commonStyleSettings.NumberPattern,
                 Alignment = (int)Word.WdListLevelAlignment.wdListLevelAlignLeft,
                 TrailingCharacter = (int)Word.WdTrailingCharacter.wdTrailingSpace
             };
@@ -71,7 +76,7 @@ namespace DocuLint
                     }
                 }
 
-                MessageBox.Show("多级列表重建完成。", "自动章节号");
+                MessageBox.Show("章节号更新完成。", "更新全部章节号");
             }
             catch (Exception ex)
             {
@@ -116,36 +121,21 @@ namespace DocuLint
             {
                 Stopwatch phaseWatch = new Stopwatch();
 
-                // 获取扫描范围：选区/整篇文档
-                Word.Range scanRange = GetOutlineScanRange(app, doc, out string scanScope);
-                bool selectionScope = string.Equals(scanScope, "当前选区", StringComparison.Ordinal);
-
-                int? targetStart = null;
-                int? targetEnd = null;
-                if (selectionScope)
-                {
-                    targetStart = scanRange.Start;
-                    targetEnd = scanRange.End;
-                }
-
-                Word.Range anchorRange = selectionScope
-                    ? doc.StoryRanges[Word.WdStoryType.wdMainTextStory].Duplicate
-                    : scanRange;
-                Word.Paragraphs scanParagraphs = anchorRange.Paragraphs;
-                int scanSteps = scanParagraphs.Count;
-                int totalSteps = Math.Max(1, scanSteps);
+                Word.Range scanRange = GetMainStoryRange(doc, out string scanScope);
+                Word.Paragraphs scanParagraphs = scanRange.Paragraphs;
+                int totalSteps = Math.Max(1, scanParagraphs.Count);
                 int currentStep = 0;
 
-                progress(0, totalSteps, "正在扫描目标级别段落...");
+                progress(0, totalSteps, "正在按大纲级别查找目标段落...");
                 result.ScanScope = scanScope;
 
                 // 1. 扫描符合条件的标题段落
                 phaseWatch.Restart();
                 List<OutlineParagraphSnapshot> targets = CollectOutlineParagraphSnapshots(
                     scanParagraphs,
-                    options.SelectedLevels,
-                    targetStart,
-                    targetEnd,
+                    selectedLevels,
+                    scanRange.Start,
+                    scanRange.End,
                     options.ClearManualNumbering,
                     totalSteps,
                     ref currentStep,
@@ -157,12 +147,12 @@ namespace DocuLint
                 // 没找到标题则退出
                 if (targets.Count == 0)
                 {
-                    throw new InvalidOperationException("未找到所选级别的段落，请检查大纲级别设置。");
+                    throw new InvalidOperationException("未找到 1-6 级大纲标题，请先设置段落的大纲级别。");
                 }
 
                 // 2. 清理手动编号
                 int manualPrefixCount = targets.Count(item => item.HasManualPrefix);
-                totalSteps = scanSteps + manualPrefixCount + targets.Count + 2;
+                totalSteps = scanParagraphs.Count + manualPrefixCount + targets.Count + 2;
                 result.ClearedManualNumberCount = 0;
                 result.CleanupMilliseconds = 0;
 
@@ -217,6 +207,127 @@ namespace DocuLint
             public int End { get; set; }                     // 结束位置
             public int ManualPrefixLength { get; set; }      // 手动编号长度
             public bool HasManualPrefix => ManualPrefixLength > 0; // 是否有手动编号
+        }
+
+        private Word.Range GetMainStoryRange(Word.Document doc, out string scope)
+        {
+            scope = "全文";
+            Word.Range mainStory = doc.StoryRanges[Word.WdStoryType.wdMainTextStory];
+            return mainStory?.Duplicate ?? doc.Content.Duplicate;
+        }
+
+        private void AutoUpdateOutlineListForParagraphs(List<Word.Paragraph> paragraphs)
+        {
+            Word.Application app = Globals.ThisAddIn.Application;
+            Word.Document doc = app?.ActiveDocument;
+            if (doc == null || paragraphs == null || paragraphs.Count == 0)
+            {
+                return;
+            }
+
+            List<OutlineParagraphSnapshot> targets = new List<OutlineParagraphSnapshot>();
+            foreach (Word.Paragraph paragraph in paragraphs)
+            {
+                int level = GetParagraphOutlineLevel(paragraph);
+                if (level < 1 || level > 6 || paragraph?.Range == null)
+                {
+                    continue;
+                }
+
+                targets.Add(new OutlineParagraphSnapshot
+                {
+                    Paragraph = paragraph,
+                    Level = level,
+                    Start = paragraph.Range.Start,
+                    End = paragraph.Range.End,
+                    ManualPrefixLength = GetManualHeadingPrefixLength(paragraph.Range.Text)
+                });
+            }
+
+            targets = targets.OrderBy(item => item.Start).ToList();
+            if (targets.Count == 0)
+            {
+                return;
+            }
+
+            OutlineListRebuildOptions options = new OutlineListRebuildOptions
+            {
+                SelectedLevels = new HashSet<int> { 1, 2, 3, 4, 5, 6 },
+                ClearManualNumbering = true,
+                NumberPattern = commonStyleSettings.NumberPattern,
+                Alignment = (int)Word.WdListLevelAlignment.wdListLevelAlignLeft,
+                TrailingCharacter = (int)Word.WdTrailingCharacter.wdTrailingSpace
+            };
+
+            using (new WordPerformanceScope(app))
+            {
+                int currentStep = 0;
+                int totalSteps = targets.Count + targets.Count(item => item.HasManualPrefix) + 2;
+                ClearManualHeadingPrefixes(doc, targets, totalSteps, ref currentStep, (current, total, message) => { });
+                bool continueFromPrevious = TryFindPreviousOutlineListTemplate(doc, targets[0].Start, out Word.ListTemplate listTemplate);
+                if (!continueFromPrevious)
+                {
+                    listTemplate = BuildOutlineListTemplate(doc, options);
+                }
+
+                ApplyOutlineListToParagraphs(targets, listTemplate, totalSteps, ref currentStep, (current, total, message) => { }, continueFromPrevious);
+            }
+        }
+
+        private bool TryFindPreviousOutlineListTemplate(
+            Word.Document doc,
+            int beforePosition,
+            out Word.ListTemplate listTemplate)
+        {
+            listTemplate = null;
+            if (doc == null || beforePosition <= doc.Content.Start)
+            {
+                return false;
+            }
+
+            Word.Range probeRange = doc.Range(doc.Content.Start, Math.Min(beforePosition, doc.Content.End));
+            Word.Paragraphs paragraphs = probeRange.Paragraphs;
+            for (int i = paragraphs.Count; i >= 1; i--)
+            {
+                Word.Paragraph paragraph = paragraphs[i];
+                int level = GetParagraphOutlineLevel(paragraph);
+                if (level < 1 || level > 6)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    Word.ListFormat listFormat = paragraph.Range.ListFormat;
+                    if (listFormat != null
+                        && listFormat.ListType != Word.WdListType.wdListNoNumbering
+                        && listFormat.ListTemplate != null)
+                    {
+                        listTemplate = listFormat.ListTemplate;
+                        return true;
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return false;
+        }
+
+        private static int GetParagraphOutlineLevel(Word.Paragraph paragraph)
+        {
+            try
+            {
+                Word.WdOutlineLevel level = paragraph.OutlineLevel;
+                return level >= Word.WdOutlineLevel.wdOutlineLevel1 && level <= Word.WdOutlineLevel.wdOutlineLevel9
+                    ? (int)level
+                    : 0;
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         // 收集所有需要处理的标题段落
@@ -281,37 +392,6 @@ namespace DocuLint
                 }
             }
             return targets;
-        }
-
-        // 获取扫描范围：选中内容 或 整篇正文
-        private Word.Range GetOutlineScanRange(Word.Application app, Word.Document doc, out string scope)
-        {
-            scope = "正文";
-            try
-            {
-                Word.Selection selection = app.Selection;
-                if (selection != null && selection.Range != null)
-                {
-                    Word.Range selected = selection.Range;
-                    // 有选中内容且是正文
-                    if (selected.Start != selected.End && selected.StoryType == Word.WdStoryType.wdMainTextStory)
-                    {
-                        scope = "当前选区";
-                        return selected.Duplicate;
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            // 默认返回整篇正文
-            Word.Range mainStory = doc.StoryRanges[Word.WdStoryType.wdMainTextStory];
-            if (mainStory != null)
-            {
-                return mainStory.Duplicate;
-            }
-            return doc.Content.Duplicate;
         }
 
         // 清理段落前的手动编号
@@ -401,7 +481,8 @@ namespace DocuLint
             Word.ListTemplate listTemplate,
             int totalSteps,
             ref int currentStep,
-            Action<int, int, string> progress)
+            Action<int, int, string> progress,
+            bool continueFirstList = false)
         {
             int count = 0;
             int progressInterval = targets.Count > 5000 ? 500 : 200;
@@ -426,7 +507,7 @@ namespace DocuLint
                     paragraphRange.ParagraphFormat.LeftIndent = 0f;
                     paragraphRange.ParagraphFormat.FirstLineIndent = 0f;
 
-                    bool continuePreviousList = count > 0;
+                    bool continuePreviousList = count > 0 || continueFirstList;
 
                     // 应用列表模板
                     paragraphRange.ListFormat.ApplyListTemplateWithLevel(
