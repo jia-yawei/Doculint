@@ -1,0 +1,70 @@
+# Visual Studio / VS Code / Rider
+.vs/
+**/.vs/
+.vs.bak_*/
+**/.vs.bak_*/
+.vscode/
+.idea/
+_ReSharper*/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+*.dtbcache.json
+
+# Build outputs
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+artifacts/
+
+# NuGet / restore caches
+packages/
+*.nupkg
+*.snupkg
+project.assets.json
+project.nuget.cache
+*.nuget.dgspec.json
+*.nuget.g.props
+*.nuget.g.targets
+
+# Logs / caches / local databases
+*.log
+*.tlog
+*.cache
+*.ilk
+*.db
+*.db-shm
+*.db-wal
+*.vsidx
+*.mpack
+
+# Office / VSTO generated outputs
+*.vsto
+*.manifest
+*.deploy
+docs/*.docx
+docs/*.pdf
+DocuLint/DocuLint/resource/output/
+DocuLint/DocuLint/resource/*.png
+
+# Local test and scratch files
+TestResults/
+*.trx
+test_*.ps1
+.codex-session/history/
+.codex-session/session-brief.local.md
+.codex-session/last-read.txt
+
+# Signing keys and local certificates
+*.pfx
+*.p12
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
