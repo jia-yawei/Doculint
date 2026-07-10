@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using Microsoft.Office.Tools.Ribbon;
+using Office = Microsoft.Office.Core;
 using Word = Microsoft.Office.Interop.Word;
 
 namespace DocuLint
@@ -38,6 +39,83 @@ namespace DocuLint
             }
 
             return Math.Max(0, scanStart);
+        }
+
+        private static bool IsPictureInlineShape(Word.InlineShape inlineShape)
+        {
+            if (inlineShape == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                switch (inlineShape.Type)
+                {
+                    case Word.WdInlineShapeType.wdInlineShapePicture:
+                    case Word.WdInlineShapeType.wdInlineShapeLinkedPicture:
+                        return true;
+                    case Word.WdInlineShapeType.wdInlineShapeEmbeddedOLEObject:
+                    case Word.WdInlineShapeType.wdInlineShapeLinkedOLEObject:
+                        return IsVisioOleObject(inlineShape.OLEFormat);
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private static bool IsPictureShape(Word.Shape shape)
+        {
+            if (shape == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                return shape.Type == Office.MsoShapeType.msoPicture
+                    || shape.Type == Office.MsoShapeType.msoLinkedPicture
+                    || ((shape.Type == Office.MsoShapeType.msoEmbeddedOLEObject
+                        || shape.Type == Office.MsoShapeType.msoLinkedOLEObject)
+                        && IsVisioOleObject(shape.OLEFormat));
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsVisioOleObject(Word.OLEFormat oleFormat)
+        {
+            if (oleFormat == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                string progId = oleFormat.ProgID ?? string.Empty;
+                if (progId.IndexOf("Visio", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                string classType = oleFormat.ClassType ?? string.Empty;
+                return classType.IndexOf("Visio", StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private void btnListCaptions_Click(object sender, RibbonControlEventArgs e)
@@ -78,77 +156,16 @@ namespace DocuLint
             }
 
             int scanStart = GetScanStartAfterToc(doc);
-            try
-            {
-                foreach (Word.InlineShape inlineShape in doc.InlineShapes)
-                {
-                    if (!IsPictureInlineShape(inlineShape))
-                    {
-                        continue;
-                    }
-
-                    Word.Range range = inlineShape?.Range;
-                    if (range == null || range.End <= scanStart)
-                    {
-                        continue;
-                    }
-
-                    TryAddCaptionEntry(entryMap, GetParagraphBelowRange(doc, range)?.Range, scanStart);
-                }
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                foreach (Word.Shape shape in doc.Shapes)
-                {
-                    if (!IsPictureShape(shape))
-                    {
-                        continue;
-                    }
-
-                    Word.Range anchor = shape?.Anchor;
-                    if (anchor == null || anchor.End <= scanStart)
-                    {
-                        continue;
-                    }
-
-                    TryAddCaptionEntry(entryMap, GetParagraphBelowRange(doc, anchor)?.Range, scanStart);
-                }
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                foreach (Word.Table table in doc.Tables)
-                {
-                    Word.Range tableRange = table?.Range;
-                    if (tableRange == null || tableRange.End <= scanStart)
-                    {
-                        continue;
-                    }
-
-                    TryAddCaptionEntry(entryMap, FindParagraphImmediatelyBeforeTable(table)?.Range, scanStart);
-                }
-            }
-            catch
-            {
-            }
-
-            // 兜底：如果文档没有被宿主正确暴露为图/表对象，再走一次段落扫描。
+            CollectCaptionEntriesBySequenceFields(doc, scanStart, entryMap);
             if (entryMap.Count == 0)
             {
-                CollectCaptionEntriesByParagraphScan(doc, scanStart, entryMap);
+                CollectCaptionEntriesFromFields(doc.Fields, scanStart, entryMap);
             }
 
             return entryMap.Values.OrderBy(item => item.Start).ToList();
         }
 
-        private static void CollectCaptionEntriesByParagraphScan(
+        private static void CollectCaptionEntriesBySequenceFields(
             Word.Document doc,
             int scanStart,
             Dictionary<int, CaptionListEntry> entryMap)
@@ -158,40 +175,80 @@ namespace DocuLint
                 return;
             }
 
-            int paragraphCount = 0;
-            try
+            foreach (Word.Range storyRange in EnumerateStoryRanges(doc))
             {
-                paragraphCount = doc.Paragraphs.Count;
-            }
-            catch
-            {
-                paragraphCount = 0;
-            }
+                if (storyRange?.Fields == null)
+                {
+                    continue;
+                }
 
-            for (int i = 1; i <= paragraphCount; i++)
-            {
-                Word.Paragraph paragraph = null;
+                int storyScanStart = IsMainTextStory(storyRange) ? scanStart : 0;
                 try
                 {
-                    paragraph = doc.Paragraphs[i];
+                    foreach (Word.Field field in storyRange.Fields)
+                    {
+                        try
+                        {
+                            if (!IsCaptionSequenceField(field))
+                            {
+                                continue;
+                            }
+
+                            TryAddCaptionEntry(entryMap, GetCaptionParagraphRange(field), storyScanStart);
+                        }
+                        catch
+                        {
+                        }
+                    }
                 }
                 catch
                 {
-                    continue;
                 }
+            }
+        }
 
-                Word.Range range = paragraph?.Range;
-                if (range == null || range.End <= scanStart)
+        private static void CollectCaptionEntriesFromFields(
+            Word.Fields fields,
+            int scanStart,
+            Dictionary<int, CaptionListEntry> entryMap)
+        {
+            if (fields == null || entryMap == null)
+            {
+                return;
+            }
+
+            try
+            {
+                foreach (Word.Field field in fields)
                 {
-                    continue;
-                }
+                    try
+                    {
+                        if (!IsCaptionSequenceField(field))
+                        {
+                            continue;
+                        }
 
-                if (i % 300 == 0)
-                {
-                    Application.DoEvents();
+                        TryAddCaptionEntry(entryMap, GetCaptionParagraphRange(field), scanStart);
+                    }
+                    catch
+                    {
+                    }
                 }
+            }
+            catch
+            {
+            }
+        }
 
-                TryAddCaptionEntry(entryMap, range, scanStart);
+        private static Word.Range GetCaptionParagraphRange(Word.Field field)
+        {
+            try
+            {
+                return GetHostParagraph(field?.Result)?.Range;
+            }
+            catch
+            {
+                return null;
             }
         }
 
@@ -223,10 +280,12 @@ namespace DocuLint
 
         private static string NormalizeParagraphText(string text)
         {
-            return (text ?? string.Empty)
+            string value = (text ?? string.Empty)
                 .Replace("\r", string.Empty)
                 .Replace("\a", string.Empty)
                 .Trim();
+
+            return Regex.Replace(value, @"^[\u0000-\u001F]+", string.Empty).Trim();
         }
 
         private static bool IsCaptionText(string normalized)
@@ -237,6 +296,48 @@ namespace DocuLint
             }
 
             return CaptionPrefixRegex.IsMatch(normalized);
+        }
+
+        private static bool IsCaptionSequenceField(Word.Field field)
+        {
+            if (field == null)
+            {
+                return false;
+            }
+
+            string codeText;
+            try
+            {
+                codeText = field.Code?.Text ?? string.Empty;
+            }
+            catch
+            {
+                return false;
+            }
+
+            Match match = Regex.Match(codeText, @"(?:^|\s)SEQ\s+(?<name>[^\s\\]+)", RegexOptions.IgnoreCase);
+            if (!match.Success)
+            {
+                return false;
+            }
+
+            string sequenceName = match.Groups["name"].Value.Trim();
+            return string.Equals(sequenceName, ImageCaptionSequenceIdentifier, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(sequenceName, TableCaptionSequenceIdentifier, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(sequenceName, "Figure", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(sequenceName, "Table", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsMainTextStory(Word.Range range)
+        {
+            try
+            {
+                return range != null && range.StoryType == Word.WdStoryType.wdMainTextStory;
+            }
+            catch
+            {
+                return true;
+            }
         }
     }
 }

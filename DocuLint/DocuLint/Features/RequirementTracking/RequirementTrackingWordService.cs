@@ -428,6 +428,274 @@ namespace DocuLint
             return CollectSrsThirdChapterRequirements(doc, progressReporter);
         }
 
+        public static string ResolveNearestSectionNumber(Word.Document doc, int position)
+        {
+            Word.Range headingRange = null;
+            string rawNumber;
+            string headingText;
+            try
+            {
+                string currentParagraphNumber = TryResolveCurrentOutlineHeadingNumber(doc, position);
+                if (!string.IsNullOrWhiteSpace(currentParagraphNumber))
+                {
+                    return currentParagraphNumber;
+                }
+
+                headingRange = GoToPreviousOutlineHeadingFromPosition(doc, position);
+                if (headingRange != null)
+                {
+                    string number = TryResolveHeadingNumber(headingRange, out _);
+                    if (!string.IsNullOrWhiteSpace(number))
+                    {
+                        return number;
+                    }
+                }
+
+                return TryFindNearestOutlineNumberedHeadingBeforePosition(doc, position, out rawNumber, out headingText)
+                    ? rawNumber
+                    : string.Empty;
+            }
+            finally
+            {
+                ReleaseComObject(headingRange);
+            }
+        }
+
+        public static string ResolveCurrentHeadingNumber(Word.Selection selection)
+        {
+            Word.Range headingRange = null;
+            try
+            {
+                headingRange = selection?.Range?.Bookmarks?["\\HeadingLevel"]?.Range;
+                string number = TryGetRangeListString(headingRange);
+                if (!string.IsNullOrWhiteSpace(number))
+                {
+                    return number;
+                }
+
+                Word.Paragraph paragraph = headingRange?.Paragraphs?[1];
+                try
+                {
+                    return TryGetParagraphListNumber(paragraph);
+                }
+                finally
+                {
+                    ReleaseComObject(paragraph);
+                }
+            }
+            catch
+            {
+                return string.Empty;
+            }
+            finally
+            {
+                ReleaseComObject(headingRange);
+            }
+        }
+
+        private static string TryResolveCurrentOutlineHeadingNumber(Word.Document doc, int position)
+        {
+            Word.Range range = null;
+            Word.Range paragraphRange = null;
+            Word.Paragraph paragraph = null;
+            try
+            {
+                int contentEnd = Math.Max(0, doc.Content.End - 1);
+                int safeStart = Math.Max(0, Math.Min(position, contentEnd));
+                range = doc.Range(safeStart, safeStart);
+                paragraphRange = range.Duplicate;
+                paragraphRange.Expand(Word.WdUnits.wdParagraph);
+                paragraph = paragraphRange.Paragraphs[1];
+                if (!IsOutlineHeadingParagraph(paragraph))
+                {
+                    return string.Empty;
+                }
+
+                string text = NormalizeParagraphText(paragraphRange.Text);
+                if (string.IsNullOrWhiteSpace(text) || LooksLikeTableCaptionText(text))
+                {
+                    return string.Empty;
+                }
+
+                string number = TryGetParagraphListNumber(paragraph);
+                if (!string.IsNullOrWhiteSpace(number))
+                {
+                    return number;
+                }
+
+                string title;
+                return TryExtractSectionHeadingForContext(text, out number, out title) ? number : string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+            finally
+            {
+                ReleaseComObject(paragraph);
+                ReleaseComObject(paragraphRange);
+                ReleaseComObject(range);
+            }
+        }
+
+        private static Word.Range GoToPreviousOutlineHeadingFromPosition(Word.Document doc, int position)
+        {
+            if (doc == null || position <= 0)
+            {
+                return null;
+            }
+
+            int currentPosition = position;
+            HashSet<int> visitedStarts = new HashSet<int>();
+            for (int i = 0; i < 20; i++)
+            {
+                Word.Range headingRange = GoToPreviousHeadingFromPosition(doc, currentPosition);
+                if (headingRange == null)
+                {
+                    return null;
+                }
+
+                if (!visitedStarts.Add(headingRange.Start))
+                {
+                    ReleaseComObject(headingRange);
+                    return null;
+                }
+
+                if (IsValidOutlineHeadingRange(headingRange))
+                {
+                    return headingRange;
+                }
+
+                currentPosition = Math.Max(doc.Content.Start, headingRange.Start - 1);
+                ReleaseComObject(headingRange);
+            }
+
+            return null;
+        }
+
+        private static bool IsValidOutlineHeadingRange(Word.Range range)
+        {
+            Word.Range paragraphRange = null;
+            Word.Paragraph paragraph = null;
+            try
+            {
+                paragraphRange = range?.Duplicate;
+                paragraphRange?.Expand(Word.WdUnits.wdParagraph);
+                string text = NormalizeParagraphText(paragraphRange?.Text);
+                if (string.IsNullOrWhiteSpace(text) || LooksLikeTableCaptionText(text))
+                {
+                    return false;
+                }
+
+                paragraph = paragraphRange.Paragraphs[1];
+                Word.WdOutlineLevel level = paragraph.OutlineLevel;
+                return level >= Word.WdOutlineLevel.wdOutlineLevel1 &&
+                       level <= Word.WdOutlineLevel.wdOutlineLevel9;
+            }
+            catch
+            {
+                return false;
+            }
+            finally
+            {
+                ReleaseComObject(paragraph);
+                ReleaseComObject(paragraphRange);
+            }
+        }
+
+        private static bool TryFindNearestOutlineNumberedHeadingBeforePosition(
+            Word.Document doc,
+            int position,
+            out string rawNumber,
+            out string headingText)
+        {
+            rawNumber = string.Empty;
+            headingText = string.Empty;
+            if (doc == null || position <= 0)
+            {
+                return false;
+            }
+
+            Word.Range searchRange = null;
+            Word.Paragraphs paragraphs = null;
+            try
+            {
+                int searchStart = Math.Max(doc.Content.Start, position - 8000);
+                searchRange = doc.Range(searchStart, position);
+                paragraphs = searchRange.Paragraphs;
+                int count = paragraphs?.Count ?? 0;
+                int minIndex = Math.Max(1, count - 80);
+                for (int i = count; i >= minIndex; i--)
+                {
+                    Word.Paragraph paragraph = null;
+                    Word.Range paragraphRange = null;
+                    try
+                    {
+                        paragraph = paragraphs[i];
+                        paragraphRange = paragraph?.Range;
+                        if (paragraphRange == null ||
+                            paragraphRange.Start >= position ||
+                            IsRangeInsideTable(paragraphRange) ||
+                            !IsOutlineHeadingParagraph(paragraph))
+                        {
+                            continue;
+                        }
+
+                        string text = NormalizeParagraphText(paragraphRange.Text);
+                        if (string.IsNullOrWhiteSpace(text) || LooksLikeTableCaptionText(text))
+                        {
+                            continue;
+                        }
+
+                        string number = TryGetParagraphListNumber(paragraph);
+                        if (string.IsNullOrWhiteSpace(number))
+                        {
+                            string textTitle;
+                            TryExtractSectionHeadingForContext(text, out number, out textTitle);
+                        }
+
+                        if (string.IsNullOrWhiteSpace(number))
+                        {
+                            continue;
+                        }
+
+                        rawNumber = number;
+                        headingText = text;
+                        return true;
+                    }
+                    finally
+                    {
+                        ReleaseComObject(paragraphRange);
+                        ReleaseComObject(paragraph);
+                    }
+                }
+            }
+            catch
+            {
+            }
+            finally
+            {
+                ReleaseComObject(paragraphs);
+                ReleaseComObject(searchRange);
+            }
+
+            return false;
+        }
+
+        private static bool IsOutlineHeadingParagraph(Word.Paragraph paragraph)
+        {
+            try
+            {
+                Word.WdOutlineLevel level = paragraph.OutlineLevel;
+                return level >= Word.WdOutlineLevel.wdOutlineLevel1 &&
+                       level <= Word.WdOutlineLevel.wdOutlineLevel9;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static RequirementTrackingDocumentSnapshot CollectRequirementsByParagraphScan(
             Word.Document doc,
             Action<string> progressReporter,

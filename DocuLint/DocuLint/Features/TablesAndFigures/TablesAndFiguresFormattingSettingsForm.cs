@@ -7,14 +7,12 @@ namespace DocuLint
     internal sealed class TablesAndFiguresFormattingSettings
     {
         public TableFormattingOptions TableOptions { get; set; }
-        public ImageFormattingOptions ImageOptions { get; set; }
 
         public static TablesAndFiguresFormattingSettings CreateDefault()
         {
             return new TablesAndFiguresFormattingSettings
             {
-                TableOptions = TableFormattingOptions.CreateDefault(),
-                ImageOptions = ImageFormattingOptions.CreateDefault()
+                TableOptions = TableFormattingOptions.CreateDefault()
             };
         }
 
@@ -22,8 +20,7 @@ namespace DocuLint
         {
             return new TablesAndFiguresFormattingSettings
             {
-                TableOptions = (TableOptions ?? TableFormattingOptions.CreateDefault()).Clone(),
-                ImageOptions = (ImageOptions ?? ImageFormattingOptions.CreateDefault()).Clone()
+                TableOptions = (TableOptions ?? TableFormattingOptions.CreateDefault()).Clone()
             };
         }
     }
@@ -37,9 +34,6 @@ namespace DocuLint
         private readonly NumericUpDown tableWidthNumeric;
         private readonly NumericUpDown outerBorderNumeric;
         private readonly NumericUpDown innerBorderNumeric;
-        private readonly RadioButton scale50Radio;
-        private readonly RadioButton scale75Radio;
-        private readonly RadioButton scale100Radio;
 
         public TablesAndFiguresFormattingSettings Settings { get; private set; }
 
@@ -49,18 +43,17 @@ namespace DocuLint
 
             Font = SystemFonts.MessageBoxFont;
             AutoScaleMode = AutoScaleMode.Font;
-            Text = "图表规范参数";
+            Text = "快速表格样式参数";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterScreen;
             ShowInTaskbar = false;
             MaximizeBox = false;
             MinimizeBox = false;
             BackColor = Color.White;
-            ClientSize = new Size(600, 700);
-            MinimumSize = new Size(600, 700);
+            ClientSize = new Size(600, 480);
+            MinimumSize = new Size(600, 480);
 
             TableFormattingOptions tableOptions = Settings.TableOptions ?? TableFormattingOptions.CreateDefault();
-            ImageFormattingOptions imageOptions = Settings.ImageOptions ?? ImageFormattingOptions.CreateDefault();
 
             TableLayoutPanel rootLayout = new TableLayoutPanel
             {
@@ -72,34 +65,14 @@ namespace DocuLint
             rootLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
             rootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72f));
 
-            Panel contentPanel = new Panel
-            {
-                Dock = DockStyle.Fill,
-                BackColor = Color.White
-            };
-
-            TableLayoutPanel contentLayout = new TableLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                ColumnCount = 1,
-                RowCount = 2,
-                Padding = new Padding(22, 18, 22, 18),
-                BackColor = Color.White
-            };
-            contentLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            contentLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            contentLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
             GroupBox tableGroup = new GroupBox
             {
-                Text = "表格规范",
+                Text = "快速表格样式",
                 Dock = DockStyle.Top,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 Padding = new Padding(16, 18, 16, 14),
-                Margin = new Padding(0, 0, 0, 16)
+                Margin = new Padding(22, 18, 22, 0)
             };
 
             TableLayoutPanel tableGrid = new TableLayoutPanel
@@ -133,80 +106,7 @@ namespace DocuLint
             AddField(tableGrid, 5, "外框线（磅）", outerBorderNumeric);
             AddField(tableGrid, 6, "其他线宽（磅）", innerBorderNumeric);
             tableGroup.Controls.Add(tableGrid);
-
-            GroupBox imageGroup = new GroupBox
-            {
-                Text = "图片规范",
-                Dock = DockStyle.Top,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Padding = new Padding(16, 18, 16, 14),
-                Margin = new Padding(0)
-            };
-
-            TableLayoutPanel imagePanel = new TableLayoutPanel
-            {
-                Dock = DockStyle.Top,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                ColumnCount = 1,
-                RowCount = 2
-            };
-            imagePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            imagePanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            imagePanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
-            Label imageHintLabel = new Label
-            {
-                AutoSize = true,
-                Dock = DockStyle.Fill,
-                MaximumSize = new Size(620, 0),
-                Text = "图片大小：请选择执行“规范全部图片”时使用的缩放比例。",
-                Margin = new Padding(0, 0, 0, 10)
-            };
-
-            FlowLayoutPanel radioPanel = new FlowLayoutPanel
-            {
-                AutoSize = true,
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = true,
-                Margin = new Padding(0)
-            };
-
-            scale50Radio = new RadioButton
-            {
-                Text = "50%",
-                AutoSize = true,
-                Margin = new Padding(0, 2, 24, 0)
-            };
-            scale75Radio = new RadioButton
-            {
-                Text = "75%",
-                AutoSize = true,
-                Margin = new Padding(0, 2, 24, 0)
-            };
-            scale100Radio = new RadioButton
-            {
-                Text = "100%",
-                AutoSize = true,
-                Margin = new Padding(0, 2, 24, 0)
-            };
-
-            scale50Radio.Checked = imageOptions.ScalePercent == 50;
-            scale75Radio.Checked = imageOptions.ScalePercent == 75;
-            scale100Radio.Checked = !scale50Radio.Checked && !scale75Radio.Checked;
-
-            radioPanel.Controls.Add(scale50Radio);
-            radioPanel.Controls.Add(scale75Radio);
-            radioPanel.Controls.Add(scale100Radio);
-
-            imagePanel.Controls.Add(imageHintLabel, 0, 0);
-            imagePanel.Controls.Add(radioPanel, 0, 1);
-            imageGroup.Controls.Add(imagePanel);
-
-            contentLayout.Controls.Add(tableGroup, 0, 0);
-            contentLayout.Controls.Add(imageGroup, 0, 1);
-            contentPanel.Controls.Add(contentLayout);
+            rootLayout.Controls.Add(tableGroup, 0, 0);
 
             Panel buttonPanel = new Panel
             {
@@ -237,8 +137,6 @@ namespace DocuLint
 
             buttonPanel.Controls.Add(confirmButton);
             buttonPanel.Controls.Add(cancelButton);
-
-            rootLayout.Controls.Add(contentPanel, 0, 0);
             rootLayout.Controls.Add(buttonPanel, 0, 1);
             Controls.Add(rootLayout);
         }
@@ -256,10 +154,6 @@ namespace DocuLint
                     TableWidthCentimeters = (float)tableWidthNumeric.Value,
                     OuterBorderWidthPoints = (float)outerBorderNumeric.Value,
                     InnerBorderWidthPoints = (float)innerBorderNumeric.Value
-                },
-                ImageOptions = new ImageFormattingOptions
-                {
-                    ScalePercent = scale50Radio.Checked ? 50 : (scale75Radio.Checked ? 75 : 100)
                 }
             };
 

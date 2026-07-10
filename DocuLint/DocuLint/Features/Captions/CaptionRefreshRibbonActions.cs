@@ -11,6 +11,7 @@ namespace DocuLint
         {
             try
             {
+                ResetOperationCancellation();
                 Word.Application app = Globals.ThisAddIn.Application;
                 Word.Document doc = app?.ActiveDocument;
                 if (doc == null)
@@ -26,6 +27,11 @@ namespace DocuLint
                         ? $"已更新 {updatedCount} 个图片题注。"
                         : "未找到可更新的图片题注。",
                     "文档不加班");
+            }
+            catch (OperationCanceledException)
+            {
+                TryUpdateStatusBar(Globals.ThisAddIn?.Application, "图片题注更新已停止");
+                MessageBox.Show("图片题注更新已停止。", "文档不加班");
             }
             catch (Exception ex)
             {
@@ -64,6 +70,7 @@ namespace DocuLint
         {
             try
             {
+                ResetOperationCancellation();
                 Word.Application app = Globals.ThisAddIn.Application;
                 Word.Document doc = app?.ActiveDocument;
                 if (doc == null)
@@ -79,6 +86,11 @@ namespace DocuLint
                         ? $"已更新 {updatedCount} 个表格题注。"
                         : "未找到可更新的表格题注。",
                     "文档不加班");
+            }
+            catch (OperationCanceledException)
+            {
+                TryUpdateStatusBar(Globals.ThisAddIn?.Application, "表格题注更新已停止");
+                MessageBox.Show("表格题注更新已停止。", "文档不加班");
             }
             catch (Exception ex)
             {
@@ -120,7 +132,9 @@ namespace DocuLint
 
         private static int RefreshTableCaptions(Word.Document doc)
         {
-            return UpdateTableCaptionSequenceFields(doc);
+            int updatedCount = UpdateTableCaptionSequenceFields(doc);
+            updatedCount += SyncContinuationTableCaptions(doc);
+            return updatedCount;
         }
 
         private static Word.Paragraph GetParagraphBelowRange(Word.Document doc, Word.Range range)
@@ -278,6 +292,13 @@ namespace DocuLint
                 captionRange.Font.NameFarEast = "黑体";
                 captionRange.Font.Name = "黑体";
                 captionRange.Font.Size = 12f;
+                Word.Range paragraphRange = GetHostParagraph(captionRange)?.Range;
+                if (paragraphRange != null)
+                {
+                    paragraphRange.Font.NameFarEast = "黑体";
+                    paragraphRange.Font.Name = "黑体";
+                    paragraphRange.Font.Size = 12f;
+                }
             }
             catch
             {
@@ -286,6 +307,26 @@ namespace DocuLint
             try
             {
                 captionRange.ParagraphFormat.Alignment = Word.WdParagraphAlignment.wdAlignParagraphCenter;
+                Word.Range paragraphRange = GetHostParagraph(captionRange)?.Range;
+                if (paragraphRange != null)
+                {
+                    paragraphRange.ParagraphFormat.Alignment = Word.WdParagraphAlignment.wdAlignParagraphCenter;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                Word.Selection selection = Globals.ThisAddIn?.Application?.Selection;
+                if (selection != null)
+                {
+                    selection.Font.NameFarEast = "黑体";
+                    selection.Font.Name = "黑体";
+                    selection.Font.Size = 12f;
+                    selection.ParagraphFormat.Alignment = Word.WdParagraphAlignment.wdAlignParagraphCenter;
+                }
             }
             catch
             {
@@ -302,6 +343,7 @@ namespace DocuLint
             int updatedCount = 0;
             foreach (Word.Range storyRange in EnumerateStoryRanges(doc))
             {
+                ThrowIfOperationCancelled();
                 updatedCount += UpdateImageCaptionSequenceFieldsInRange(storyRange);
             }
 
@@ -318,10 +360,106 @@ namespace DocuLint
             int updatedCount = 0;
             foreach (Word.Range storyRange in EnumerateStoryRanges(doc))
             {
+                ThrowIfOperationCancelled();
                 updatedCount += UpdateTableCaptionSequenceFieldsInRange(storyRange);
             }
 
             return updatedCount;
+        }
+
+        private static int SyncContinuationTableCaptions(Word.Document doc)
+        {
+            if (doc == null)
+            {
+                return 0;
+            }
+
+            int updatedCount = 0;
+            foreach (Word.Range storyRange in EnumerateStoryRanges(doc))
+            {
+                ThrowIfOperationCancelled();
+                if (storyRange?.Paragraphs == null)
+                {
+                    continue;
+                }
+
+                string lastTableCaptionBase = string.Empty;
+                try
+                {
+                    foreach (Word.Paragraph paragraph in storyRange.Paragraphs)
+                    {
+                        ThrowIfOperationCancelled();
+                        Word.Range paragraphRange = paragraph?.Range;
+                        string text = NormalizeCaptionParagraphText(paragraphRange?.Text);
+                        if (string.IsNullOrWhiteSpace(text))
+                        {
+                            continue;
+                        }
+
+                        if (IsContinuationTableCaptionText(text))
+                        {
+                            if (!string.IsNullOrWhiteSpace(lastTableCaptionBase))
+                            {
+                                string expected = lastTableCaptionBase + "（续）";
+                                if (!string.Equals(text, expected, StringComparison.Ordinal))
+                                {
+                                    paragraphRange.Text = expected + "\r";
+                                    ApplyContinuationTableCaptionFormatting(paragraphRange);
+                                    updatedCount++;
+                                }
+                            }
+
+                            continue;
+                        }
+
+                        string tableCaptionBase = ExtractTableCaptionBaseText(text);
+                        if (!string.IsNullOrWhiteSpace(tableCaptionBase))
+                        {
+                            lastTableCaptionBase = tableCaptionBase;
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return updatedCount;
+        }
+
+        private static string ExtractTableCaptionBaseText(string text)
+        {
+            Match match = TableCaptionBaseRegex.Match(text ?? string.Empty);
+            return match.Success ? match.Groups[1].Value.Trim() : string.Empty;
+        }
+
+        private static bool IsContinuationTableCaptionText(string text)
+        {
+            return ContinuationTableCaptionRegex.IsMatch(text ?? string.Empty);
+        }
+
+        private static void ApplyContinuationTableCaptionFormatting(Word.Range captionRange)
+        {
+            if (captionRange == null)
+            {
+                return;
+            }
+
+            try
+            {
+                captionRange.Font.NameFarEast = "黑体";
+                captionRange.Font.Name = "黑体";
+                captionRange.Font.Size = 12f;
+                captionRange.Font.Bold = 0;
+                captionRange.ParagraphFormat.Alignment = Word.WdParagraphAlignment.wdAlignParagraphCenter;
+                captionRange.ParagraphFormat.SpaceBefore = 0f;
+                captionRange.ParagraphFormat.SpaceAfter = 0f;
+                captionRange.ParagraphFormat.KeepWithNext = -1;
+                captionRange.ParagraphFormat.KeepTogether = -1;
+            }
+            catch
+            {
+            }
         }
 
         private static int UpdateImageCaptionSequenceFieldsInRange(Word.Range range)
@@ -336,6 +474,7 @@ namespace DocuLint
             {
                 foreach (Word.Field field in range.Fields)
                 {
+                    ThrowIfOperationCancelled();
                     if (!IsImageCaptionSequenceField(field))
                     {
                         continue;
@@ -370,6 +509,7 @@ namespace DocuLint
             {
                 foreach (Word.Field field in range.Fields)
                 {
+                    ThrowIfOperationCancelled();
                     if (!IsTableCaptionSequenceField(field))
                     {
                         continue;
@@ -458,7 +598,13 @@ namespace DocuLint
                 RegexOptions.IgnoreCase);
         }
 
-        private const string ImageCaptionSequenceIdentifier = "DocuLintFigureCaption";
-        private const string TableCaptionSequenceIdentifier = "DocuLintTableCaption";
+        private const string ImageCaptionSequenceIdentifier = "图";
+        private const string TableCaptionSequenceIdentifier = "表";
+        private static readonly Regex TableCaptionBaseRegex = new Regex(
+            @"^\s*(表\s*[0-9０-９一二三四五六七八九十百千]+(?:\s*[\.．\-—]\s*[0-9０-９一二三四五六七八九十百千]+)*)",
+            RegexOptions.IgnoreCase);
+        private static readonly Regex ContinuationTableCaptionRegex = new Regex(
+            @"^\s*表\s*[0-9０-９一二三四五六七八九十百千]+(?:\s*[\.．\-—]\s*[0-9０-９一二三四五六七八九十百千]+)*\s*[（(]\s*续\s*[）)]\s*$",
+            RegexOptions.IgnoreCase);
     }
 }

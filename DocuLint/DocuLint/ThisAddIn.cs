@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Windows.Forms;
 using Word = Microsoft.Office.Interop.Word;
 using Office = Microsoft.Office.Core;
@@ -19,12 +20,34 @@ namespace DocuLint
         private RequirementTrackingConsoleControl requirementTrackingConsoleControl;
         // 需求追踪独立任务窗格
         private CustomTaskPane requirementTrackingTaskPane;
+        private RequirementExtractionPaneControl requirementExtractionPaneControl;
+        private CustomTaskPane requirementExtractionTaskPane;
+        // 文档检查结果界面控件
+        private DocumentCheckResultPaneControl documentCheckResultPaneControl;
+        // 文档检查结果任务窗格
+        private CustomTaskPane documentCheckResultTaskPane;
+        private Word.Document documentCheckResultDocument;
         // 文档跳转辅助工具
         private WordDocumentHostAdapter documentHostAdapter;
         // 文档基本信息存储
         private DocumentBasicInfoStore documentBasicInfoStore;
         // 延迟刷新 Ribbon，避免拖选文字时同步读取 Selection 打断 Word 选区。
         private Timer styleRibbonRefreshTimer;
+        // 需求提取批量模式：防抖自动添加。
+        private Timer requirementExtractionAutoAddTimer;
+        // 需求提取普通模式：等待鼠标拖选结束后再显示自定义“添加”按钮。
+        private Timer requirementQuickAddPopupTimer;
+        private string requirementExtractionAutoAddDocumentKey;
+        private int requirementExtractionAutoAddStart;
+        private int requirementExtractionAutoAddEnd;
+        private string requirementQuickAddPopupDocumentKey;
+        private int requirementQuickAddPopupStart;
+        private int requirementQuickAddPopupEnd;
+        private Point requirementQuickAddPopupLocation;
+        private RequirementQuickAddForm requirementQuickAddPopup;
+        private bool wordSelectionFloatiesSuppressed;
+        private bool previousShowSelectionFloaties;
+        private bool previousShowMenuFloaties;
 
         // 插件启动时执行
         private void ThisAddIn_Startup(object sender, System.EventArgs e)
@@ -34,11 +57,16 @@ namespace DocuLint
             documentBasicInfoStore = new DocumentBasicInfoStore();
             styleRibbonRefreshTimer = new Timer { Interval = 180 };
             styleRibbonRefreshTimer.Tick += StyleRibbonRefreshTimer_Tick;
+            requirementExtractionAutoAddTimer = new Timer { Interval = 80 };
+            requirementExtractionAutoAddTimer.Tick += RequirementExtractionAutoAddTimer_Tick;
+            requirementQuickAddPopupTimer = new Timer { Interval = 20 };
+            requirementQuickAddPopupTimer.Tick += RequirementQuickAddPopupTimer_Tick;
 
             if (Application != null)
             {
                 Application.WindowSelectionChange += Application_WindowSelectionChange;
                 Application.WindowActivate += Application_WindowActivate;
+                Application.WindowDeactivate += Application_WindowDeactivate;
             }
         }
 
@@ -51,6 +79,7 @@ namespace DocuLint
                 {
                     Application.WindowSelectionChange -= Application_WindowSelectionChange;
                     Application.WindowActivate -= Application_WindowActivate;
+                    Application.WindowDeactivate -= Application_WindowDeactivate;
                 }
                 catch
                 {
@@ -72,8 +101,42 @@ namespace DocuLint
                 styleRibbonRefreshTimer = null;
             }
 
+            if (requirementExtractionAutoAddTimer != null)
+            {
+                try
+                {
+                    requirementExtractionAutoAddTimer.Stop();
+                    requirementExtractionAutoAddTimer.Tick -= RequirementExtractionAutoAddTimer_Tick;
+                    requirementExtractionAutoAddTimer.Dispose();
+                }
+                catch
+                {
+                }
+
+                requirementExtractionAutoAddTimer = null;
+            }
+
+            if (requirementQuickAddPopupTimer != null)
+            {
+                try
+                {
+                    requirementQuickAddPopupTimer.Stop();
+                    requirementQuickAddPopupTimer.Tick -= RequirementQuickAddPopupTimer_Tick;
+                    requirementQuickAddPopupTimer.Dispose();
+                }
+                catch
+                {
+                }
+
+                requirementQuickAddPopupTimer = null;
+            }
+
             RemoveTaskPane(ref navigationTaskPane, ref navigationPaneControl);
             RemoveTaskPane(ref requirementTrackingTaskPane, ref requirementTrackingConsoleControl);
+            RemoveTaskPane(ref requirementExtractionTaskPane, ref requirementExtractionPaneControl);
+            RemoveTaskPane(ref documentCheckResultTaskPane, ref documentCheckResultPaneControl);
+            DisposeRequirementQuickAddPopup();
+            RestoreWordSelectionFloaties();
         }
 
         // 显示右侧题注面板，并加载题注数据
@@ -88,8 +151,8 @@ namespace DocuLint
 
             // 获取文档名，给面板设置题注数据
             string docName = doc == null ? "当前文档" : doc.Name;
-            navigationPaneControl.SetCaptionEntries(ConvertCaptionEntries(entries), docName);
-            navigationPaneControl.SelectTab(NavigationPaneTab.Captions);
+            SetCaptionPaneEntries(docName, ConvertCaptionEntries(entries));
+            navigationPaneControl.SelectTab(NavigationPaneTab.FigureCaptions);
 
             // 显示右侧面板
             navigationTaskPane.Visible = true;
@@ -121,6 +184,20 @@ namespace DocuLint
             SetMarkerPaneEntries(docName, entries, documentType);
             navigationPaneControl.SelectTab(NavigationPaneTab.Markers);
             navigationTaskPane.Visible = true;
+        }
+
+        internal void ShowDocumentCheckResultPane(Word.Document doc, IList<NavigationPaneEntry> entries)
+        {
+            EnsureDocumentCheckResultPane();
+            if (documentCheckResultPaneControl == null || documentCheckResultTaskPane == null)
+            {
+                return;
+            }
+
+            string docName = doc == null ? "当前文档" : doc.Name;
+            documentCheckResultPaneControl.SetEntries(entries, docName);
+            documentCheckResultDocument = doc;
+            documentCheckResultTaskPane.Visible = true;
         }
 
         internal void ConfigureDocumentBasicInfo(Word.Document doc, IWin32Window owner)
@@ -160,8 +237,38 @@ namespace DocuLint
                 return;
             }
 
-            requirementTrackingConsoleControl.RefreshDocumentOptions();
+            requirementTrackingConsoleControl.LoadCurrentDocumentAsSource();
             requirementTrackingTaskPane.Visible = true;
+        }
+
+        internal void ShowRequirementExtractionPane()
+        {
+            EnsureRequirementExtractionPane();
+            if (requirementExtractionPaneControl == null || requirementExtractionTaskPane == null)
+            {
+                return;
+            }
+
+            requirementExtractionTaskPane.Visible = true;
+            SuppressWordSelectionFloaties();
+        }
+
+        internal void AddSelectedTextToRequirementExtraction()
+        {
+            EnsureRequirementExtractionPane();
+            if (requirementExtractionPaneControl == null || requirementExtractionTaskPane == null)
+            {
+                return;
+            }
+
+            if (requirementExtractionPaneControl.BatchExtractionEnabled)
+            {
+                return;
+            }
+
+            requirementExtractionTaskPane.Visible = true;
+            HideRequirementQuickAddPopup();
+            requirementExtractionPaneControl.AddSelectionAsRequirement();
         }
 
         // 创建统一导航面板（如果还没创建）
@@ -182,7 +289,7 @@ namespace DocuLint
             {
                 navigationTaskPane = CustomTaskPanes.Add(navigationPaneControl, "导航窗格");
                 navigationTaskPane.DockPosition = Office.MsoCTPDockPosition.msoCTPDockPositionRight;
-                navigationTaskPane.Width = 380;
+                navigationTaskPane.Width = 460;
             }
         }
 
@@ -197,7 +304,59 @@ namespace DocuLint
             {
                 requirementTrackingTaskPane = CustomTaskPanes.Add(requirementTrackingConsoleControl, "需求追踪控制台");
                 requirementTrackingTaskPane.DockPosition = Office.MsoCTPDockPosition.msoCTPDockPositionRight;
-                requirementTrackingTaskPane.Width = 874;
+                requirementTrackingTaskPane.Width = 1500;
+            }
+        }
+
+        private void EnsureRequirementExtractionPane()
+        {
+            if (requirementExtractionPaneControl == null)
+            {
+                requirementExtractionPaneControl = new RequirementExtractionPaneControl(() => Application);
+                requirementExtractionPaneControl.RequirementActivated += NavigateToStart;
+                requirementExtractionPaneControl.BatchExtractionModeChanged += enabled =>
+                {
+                    if (enabled)
+                    {
+                        HideRequirementQuickAddPopup();
+                    }
+                };
+            }
+
+            if (requirementExtractionTaskPane == null)
+            {
+                requirementExtractionTaskPane = CustomTaskPanes.Add(requirementExtractionPaneControl, "需求提取");
+                requirementExtractionTaskPane.DockPosition = Office.MsoCTPDockPosition.msoCTPDockPositionRight;
+                requirementExtractionTaskPane.Width = 780;
+                requirementExtractionTaskPane.VisibleChanged += (_, __) =>
+                {
+                    if (!IsRequirementExtractionPaneVisible())
+                    {
+                        StopRequirementQuickAddPopup();
+                        HideRequirementQuickAddPopup();
+                        RestoreWordSelectionFloaties();
+                    }
+                    else
+                    {
+                        SuppressWordSelectionFloaties();
+                    }
+                };
+            }
+        }
+
+        private void EnsureDocumentCheckResultPane()
+        {
+            if (documentCheckResultPaneControl == null)
+            {
+                documentCheckResultPaneControl = new DocumentCheckResultPaneControl();
+                documentCheckResultPaneControl.IssueActivated += OnDocumentCheckIssueActivated;
+            }
+
+            if (documentCheckResultTaskPane == null)
+            {
+                documentCheckResultTaskPane = CustomTaskPanes.Add(documentCheckResultPaneControl, "文档检查结果");
+                documentCheckResultTaskPane.DockPosition = Office.MsoCTPDockPosition.msoCTPDockPositionRight;
+                documentCheckResultTaskPane.Width = 460;
             }
         }
 
@@ -214,6 +373,19 @@ namespace DocuLint
 
         private void OnMarkerActivated(int start)
         {
+            NavigateToStart(start);
+        }
+
+        private void OnDocumentCheckIssueActivated(int start)
+        {
+            try
+            {
+                documentCheckResultDocument?.Activate();
+            }
+            catch
+            {
+            }
+
             NavigateToStart(start);
         }
 
@@ -261,14 +433,62 @@ namespace DocuLint
                 case NavigationPaneTab.Bookmarks:
                     navigationPaneControl.SetBookmarkEntries(Ribbon1.CollectBookmarkEntries(doc), docName);
                     break;
-                case NavigationPaneTab.Captions:
-                    navigationPaneControl.SetCaptionEntries(ConvertCaptionEntries(Ribbon1.CollectCaptionListEntries(doc)), docName);
+                case NavigationPaneTab.FigureCaptions:
+                case NavigationPaneTab.TableCaptions:
+                    SetCaptionPaneEntries(docName, ConvertCaptionEntries(Ribbon1.CollectCaptionListEntries(doc)));
                     break;
                 case NavigationPaneTab.Markers:
                     DocumentMarkerCollectionResult markerResult = DocumentMarkerService.CollectMarkers(doc);
                     SetMarkerPaneEntries(docName, markerResult.Entries, markerResult.DocumentType);
                     break;
             }
+        }
+
+        private void SetCaptionPaneEntries(string docName, IList<NavigationPaneEntry> entries)
+        {
+            if (navigationPaneControl == null)
+            {
+                return;
+            }
+
+            List<NavigationPaneEntry> figures = new List<NavigationPaneEntry>();
+            List<NavigationPaneEntry> tables = new List<NavigationPaneEntry>();
+            if (entries != null)
+            {
+                foreach (NavigationPaneEntry entry in entries)
+                {
+                    if (entry == null)
+                    {
+                        continue;
+                    }
+
+                    if (IsTableCaption(entry.Text))
+                    {
+                        tables.Add(entry);
+                    }
+                    else if (IsFigureCaption(entry.Text))
+                    {
+                        figures.Add(entry);
+                }
+            }
+        }
+
+            navigationPaneControl.SetFigureCaptionEntries(figures, docName);
+            navigationPaneControl.SetTableCaptionEntries(tables, docName);
+        }
+
+        private static bool IsFigureCaption(string text)
+        {
+            string value = (text ?? string.Empty).TrimStart();
+            return value.StartsWith("图", StringComparison.OrdinalIgnoreCase)
+                || value.StartsWith("Figure", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsTableCaption(string text)
+        {
+            string value = (text ?? string.Empty).TrimStart();
+            return value.StartsWith("表", StringComparison.OrdinalIgnoreCase)
+                || value.StartsWith("Table", StringComparison.OrdinalIgnoreCase);
         }
 
         private void SetMarkerPaneEntries(string docName, IList<NavigationPaneEntry> entries, DocumentMarkerDocumentType documentType)
@@ -314,11 +534,30 @@ namespace DocuLint
         private void Application_WindowSelectionChange(Word.Selection selection)
         {
             ScheduleStyleRibbonRefresh(selection);
+            ScheduleRequirementExtractionAutoAdd(selection);
+            ScheduleRequirementQuickAddPopup(selection);
         }
 
         private void Application_WindowActivate(Word.Document doc, Word.Window wn)
         {
             ScheduleStyleRibbonRefresh(null);
+            StopRequirementExtractionAutoAdd();
+            StopRequirementQuickAddPopup();
+            HideRequirementQuickAddPopup();
+            if (IsRequirementExtractionPaneVisible())
+            {
+                SuppressWordSelectionFloaties();
+            }
+            else
+            {
+                RestoreWordSelectionFloaties();
+            }
+        }
+
+        private void Application_WindowDeactivate(Word.Document doc, Word.Window wn)
+        {
+            StopRequirementQuickAddPopup();
+            HideRequirementQuickAddPopup();
         }
 
         private DocumentBasicInfo LoadDocumentBasicInfo(Word.Document doc)
@@ -394,6 +633,384 @@ namespace DocuLint
             }
         }
 
+        private void ScheduleRequirementQuickAddPopup(Word.Selection selection)
+        {
+            if (!IsRequirementExtractionPaneVisible() ||
+                requirementExtractionPaneControl == null ||
+                requirementExtractionPaneControl.BatchExtractionEnabled ||
+                !IsNonCollapsedSelection(selection))
+            {
+                StopRequirementQuickAddPopup();
+                HideRequirementQuickAddPopup();
+                return;
+            }
+
+            SuppressWordSelectionFloaties();
+            if (!TryCaptureRequirementQuickAddSelection(selection))
+            {
+                StopRequirementQuickAddPopup();
+                HideRequirementQuickAddPopup();
+                return;
+            }
+
+            if (Control.MouseButtons == MouseButtons.None)
+            {
+                ShowRequirementQuickAddPopupIfSelectionStable();
+                return;
+            }
+
+            requirementQuickAddPopupTimer?.Stop();
+            requirementQuickAddPopupTimer?.Start();
+        }
+
+        private void RequirementQuickAddPopupTimer_Tick(object sender, EventArgs e)
+        {
+            if (Control.MouseButtons != MouseButtons.None)
+            {
+                requirementQuickAddPopupTimer?.Stop();
+                requirementQuickAddPopupTimer?.Start();
+                return;
+            }
+
+            ShowRequirementQuickAddPopupIfSelectionStable();
+        }
+
+        private void ShowRequirementQuickAddPopupIfSelectionStable()
+        {
+            StopRequirementQuickAddPopupTimerOnly();
+            Word.Selection selection = null;
+            try
+            {
+                selection = Application?.Selection;
+            }
+            catch
+            {
+            }
+
+            if (!IsRequirementExtractionPaneVisible() ||
+                requirementExtractionPaneControl == null ||
+                requirementExtractionPaneControl.BatchExtractionEnabled ||
+                !IsNonCollapsedSelection(selection) ||
+                !SelectionMatchesQuickAddSelection(selection))
+            {
+                HideRequirementQuickAddPopup();
+                return;
+            }
+
+            SuppressWordSelectionFloaties();
+            EnsureRequirementQuickAddPopup();
+            requirementQuickAddPopup.ShowNear(requirementQuickAddPopupLocation, GetActiveWordWindowOwner());
+        }
+
+        private bool IsRequirementExtractionPaneVisible()
+        {
+            try
+            {
+                return requirementExtractionTaskPane != null && requirementExtractionTaskPane.Visible;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void ScheduleRequirementExtractionAutoAdd(Word.Selection selection)
+        {
+            if (!IsRequirementExtractionPaneVisible() ||
+                requirementExtractionPaneControl == null ||
+                !requirementExtractionPaneControl.BatchExtractionEnabled ||
+                !IsNonCollapsedSelection(selection))
+            {
+                StopRequirementExtractionAutoAdd();
+                return;
+            }
+
+            if (Control.MouseButtons == MouseButtons.None)
+            {
+                StopRequirementExtractionAutoAdd();
+                try
+                {
+                    if (requirementExtractionPaneControl.TryAutoAddSelection())
+                    {
+                        HideRequirementQuickAddPopup();
+                    }
+                }
+                catch
+                {
+                }
+
+                return;
+            }
+
+            if (!TryCaptureRequirementExtractionSelection(selection))
+            {
+                StopRequirementExtractionAutoAdd();
+                return;
+            }
+
+            requirementExtractionAutoAddTimer?.Stop();
+            requirementExtractionAutoAddTimer?.Start();
+        }
+
+        private void RequirementExtractionAutoAddTimer_Tick(object sender, EventArgs e)
+        {
+            StopRequirementExtractionAutoAdd();
+
+            Word.Selection selection = null;
+            try
+            {
+                selection = Application?.Selection;
+            }
+            catch
+            {
+            }
+
+            if (!IsRequirementExtractionPaneVisible() ||
+                requirementExtractionPaneControl == null ||
+                !requirementExtractionPaneControl.BatchExtractionEnabled ||
+                !IsNonCollapsedSelection(selection) ||
+                !SelectionMatchesCapturedSelection(selection))
+            {
+                return;
+            }
+
+            try
+            {
+                if (requirementExtractionPaneControl.TryAutoAddSelection())
+                {
+                    HideRequirementQuickAddPopup();
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private void StopRequirementExtractionAutoAdd()
+        {
+            try
+            {
+                requirementExtractionAutoAddTimer?.Stop();
+            }
+            catch
+            {
+            }
+
+            requirementExtractionAutoAddDocumentKey = null;
+            requirementExtractionAutoAddStart = 0;
+            requirementExtractionAutoAddEnd = 0;
+        }
+
+        private void StopRequirementQuickAddPopup()
+        {
+            StopRequirementQuickAddPopupTimerOnly();
+            requirementQuickAddPopupDocumentKey = null;
+            requirementQuickAddPopupStart = 0;
+            requirementQuickAddPopupEnd = 0;
+        }
+
+        private void StopRequirementQuickAddPopupTimerOnly()
+        {
+            try
+            {
+                requirementQuickAddPopupTimer?.Stop();
+            }
+            catch
+            {
+            }
+        }
+
+        private bool TryCaptureRequirementExtractionSelection(Word.Selection selection)
+        {
+            try
+            {
+                Word.Range range = selection?.Range;
+                Word.Document doc = selection?.Document;
+                if (range == null || doc == null)
+                {
+                    return false;
+                }
+
+                requirementExtractionAutoAddDocumentKey = GetDocumentKey(doc);
+                requirementExtractionAutoAddStart = range.Start;
+                requirementExtractionAutoAddEnd = range.End;
+                return requirementExtractionAutoAddEnd > requirementExtractionAutoAddStart;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool SelectionMatchesCapturedSelection(Word.Selection selection)
+        {
+            try
+            {
+                Word.Range range = selection?.Range;
+                Word.Document doc = selection?.Document;
+                if (range == null || doc == null)
+                {
+                    return false;
+                }
+
+                string currentKey = GetDocumentKey(doc);
+                return string.Equals(currentKey, requirementExtractionAutoAddDocumentKey, StringComparison.OrdinalIgnoreCase) &&
+                       range.Start == requirementExtractionAutoAddStart &&
+                       range.End == requirementExtractionAutoAddEnd;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool TryCaptureRequirementQuickAddSelection(Word.Selection selection)
+        {
+            try
+            {
+                Word.Range range = selection?.Range;
+                Word.Document doc = selection?.Document;
+                if (range == null || doc == null || range.End <= range.Start)
+                {
+                    return false;
+                }
+
+                requirementQuickAddPopupDocumentKey = GetDocumentKey(doc);
+                requirementQuickAddPopupStart = range.Start;
+                requirementQuickAddPopupEnd = range.End;
+                requirementQuickAddPopupLocation = Cursor.Position;
+                requirementQuickAddPopupLocation.Offset(12, 16);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool SelectionMatchesQuickAddSelection(Word.Selection selection)
+        {
+            try
+            {
+                Word.Range range = selection?.Range;
+                Word.Document doc = selection?.Document;
+                if (range == null || doc == null)
+                {
+                    return false;
+                }
+
+                string currentKey = GetDocumentKey(doc);
+                return string.Equals(currentKey, requirementQuickAddPopupDocumentKey, StringComparison.OrdinalIgnoreCase) &&
+                       range.Start == requirementQuickAddPopupStart &&
+                       range.End == requirementQuickAddPopupEnd;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string GetDocumentKey(Word.Document doc)
+        {
+            try
+            {
+                return string.IsNullOrWhiteSpace(doc?.FullName) ? doc?.Name ?? string.Empty : doc.FullName;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private void EnsureRequirementQuickAddPopup()
+        {
+            if (requirementQuickAddPopup != null && !requirementQuickAddPopup.IsDisposed)
+            {
+                return;
+            }
+
+            requirementQuickAddPopup = new RequirementQuickAddForm(AddSelectedTextToRequirementExtraction);
+        }
+
+        private IWin32Window GetActiveWordWindowOwner()
+        {
+            try
+            {
+                int hwnd = Application?.ActiveWindow?.Hwnd ?? 0;
+                return hwnd == 0 ? null : new WindowHandle(new IntPtr(hwnd));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void HideRequirementQuickAddPopup()
+        {
+            try
+            {
+                requirementQuickAddPopup?.Hide();
+            }
+            catch
+            {
+            }
+        }
+
+        private void DisposeRequirementQuickAddPopup()
+        {
+            try
+            {
+                requirementQuickAddPopup?.Dispose();
+            }
+            catch
+            {
+            }
+
+            requirementQuickAddPopup = null;
+        }
+
+        private void SuppressWordSelectionFloaties()
+        {
+            try
+            {
+                if (Application?.Options == null)
+                {
+                    return;
+                }
+
+                if (!wordSelectionFloatiesSuppressed)
+                {
+                    previousShowSelectionFloaties = Application.Options.ShowSelectionFloaties;
+                    previousShowMenuFloaties = Application.Options.ShowMenuFloaties;
+                    wordSelectionFloatiesSuppressed = true;
+                }
+
+                Application.Options.ShowSelectionFloaties = false;
+                Application.Options.ShowMenuFloaties = false;
+            }
+            catch
+            {
+            }
+        }
+
+        private void RestoreWordSelectionFloaties()
+        {
+            try
+            {
+                if (!wordSelectionFloatiesSuppressed || Application?.Options == null)
+                {
+                    return;
+                }
+
+                Application.Options.ShowSelectionFloaties = previousShowSelectionFloaties;
+                Application.Options.ShowMenuFloaties = previousShowMenuFloaties;
+                wordSelectionFloatiesSuppressed = false;
+            }
+            catch
+            {
+            }
+        }
+
         private void RemoveTaskPane<TControl>(ref CustomTaskPane taskPane, ref TControl control)
             where TControl : class
         {
@@ -410,6 +1027,79 @@ namespace DocuLint
 
             taskPane = null;
             control = null;
+        }
+
+        private sealed class RequirementQuickAddForm : Form
+        {
+            private const int WsExNoActivate = 0x08000000;
+            private readonly System.Action addAction;
+
+            internal RequirementQuickAddForm(System.Action addAction)
+            {
+                this.addAction = addAction;
+                AutoScaleMode = AutoScaleMode.None;
+                BackColor = Color.White;
+                ClientSize = new Size(74, 34);
+                FormBorderStyle = FormBorderStyle.None;
+                ShowInTaskbar = false;
+                StartPosition = FormStartPosition.Manual;
+                TopMost = false;
+
+                Button button = new Button
+                {
+                    Dock = DockStyle.Fill,
+                    Text = "添加",
+                    Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold),
+                    BackColor = Color.FromArgb(47, 111, 237),
+                    ForeColor = Color.White,
+                    FlatStyle = FlatStyle.Flat
+                };
+                button.FlatAppearance.BorderSize = 0;
+                button.Click += (_, __) =>
+                {
+                    Hide();
+                    this.addAction?.Invoke();
+                };
+                Controls.Add(button);
+            }
+
+            protected override bool ShowWithoutActivation => true;
+
+            protected override CreateParams CreateParams
+            {
+                get
+                {
+                    CreateParams cp = base.CreateParams;
+                    cp.ExStyle |= WsExNoActivate;
+                    return cp;
+                }
+            }
+
+            internal void ShowNear(Point location, IWin32Window owner)
+            {
+                Location = location;
+                if (!Visible)
+                {
+                    if (owner == null)
+                    {
+                        Show();
+                    }
+                    else
+                    {
+                        Show(owner);
+                    }
+                }
+            }
+        }
+
+        private sealed class WindowHandle : IWin32Window
+        {
+            internal WindowHandle(IntPtr handle)
+            {
+                Handle = handle;
+            }
+
+            public IntPtr Handle { get; }
         }
 
         #region VSTO 生成的代码

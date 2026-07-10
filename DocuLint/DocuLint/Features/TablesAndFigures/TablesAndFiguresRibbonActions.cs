@@ -4,21 +4,15 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Drawing;
 using System.Windows.Forms;
 using Microsoft.Office.Tools.Ribbon;
-using Office = Microsoft.Office.Core;
 using Word = Microsoft.Office.Interop.Word;
 
 namespace DocuLint
 {
     public partial class Ribbon1
     {
-        private const float DefaultTableWidthCm = 17.4f;
         private const float DefaultOuterBorderWidthPt = 1.5f;
-        private const float DefaultInnerBorderWidthPt = 0.5f;
-        private const float DefaultHeaderFontSizePt = 12f;
-        private const float DefaultBodyFontSizePt = 10.5f;
         private static TablesAndFiguresFormattingSettings currentTablesAndFiguresFormattingSettings =
             TablesAndFiguresFormattingSettings.CreateDefault();
 
@@ -43,10 +37,6 @@ namespace DocuLint
             return (currentTablesAndFiguresFormattingSettings?.TableOptions ?? TableFormattingOptions.CreateDefault()).Clone();
         }
 
-        private static ImageFormattingOptions GetCurrentImageFormattingOptions()
-        {
-            return (currentTablesAndFiguresFormattingSettings?.ImageOptions ?? ImageFormattingOptions.CreateDefault()).Clone();
-        }
 
         private void button18_Click(object sender, RibbonControlEventArgs e)
         {
@@ -56,160 +46,69 @@ namespace DocuLint
                 Word.Document doc = app?.ActiveDocument;
                 Word.Selection selection = app?.Selection;
 
-                if (doc == null)
+                if (doc == null || selection == null)
                 {
-                    MessageBox.Show("当前没有活动文档。", "文档不加班");
+                    MessageBox.Show("请先把光标放到要拆分的表格中。", "文档不加班");
                     return;
                 }
 
-                if (selection == null)
+                Word.Table sourceTable = GetTargetTableFromSelection(selection);
+                if (sourceTable?.Range == null)
                 {
-                    MessageBox.Show("请先选中跨页表格，或把光标放到跨页表格中。", "文档不加班");
+                    MessageBox.Show("请先把光标放到要拆分的表格中。", "文档不加班");
                     return;
                 }
 
-                using (TableSplitProgressForm progressForm = new TableSplitProgressForm())
+                Word.Paragraph captionParagraph = GetNearestNonEmptyParagraphBeforeTableParagraph(doc, sourceTable);
+                string baseCaption = ExtractTableCaptionBase(captionParagraph == null
+                    ? string.Empty
+                    : NormalizeParagraphText(captionParagraph.Range.Text));
+                if (string.IsNullOrWhiteSpace(baseCaption))
                 {
-                    progressForm.Show();
-                    progressForm.ReportProgress(3, "正在准备拆分...", "正在读取当前选中的跨页表格。");
+                    MessageBox.Show("未识别到当前表格的表题，无法生成“表X（续）”。", "文档不加班");
+                    return;
+                }
 
-                    try
+                int sourceTableStart = sourceTable.Range.Start;
+                int sourceTableEnd = sourceTable.Range.End;
+                int tableCountBefore = doc.Tables?.Count ?? 0;
+
+                using (new WordPerformanceScope(app))
+                {
+                    if (!TryExecuteNativeSplitTable(selection))
                     {
-                        int continuationCount;
-                        using (new WordPerformanceScope(app))
-                        {
-                            continuationCount = SplitTableAtAutoCrossPagePosition(app, doc, selection, progressForm);
-                        }
-
-                        if (continuationCount > 0 && !progressForm.IsFinalized)
-                        {
-                            try
-                            {
-                                app.ScreenRefresh();
-                            }
-                            catch
-                            {
-                            }
-
-                            Application.DoEvents();
-                            progressForm.Complete(
-                                $"已成功拆分为{continuationCount}个续表。",
-                                "表格拆分、表头补齐和续表题注插入已完成。",
-                                true);
-                        }
-                        else if (!progressForm.IsFinalized)
-                        {
-                            progressForm.Complete(
-                                "当前表格没有生成新的续表。",
-                                "如果这是跨页表格，请确认光标位于需要处理的表格内，或先选中目标表格。",
-                                false);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        if (!progressForm.IsFinalized)
-                        {
-                            progressForm.Complete(
-                                "按续表拆分失败。",
-                                ex.Message,
-                                false);
-                        }
+                        MessageBox.Show("拆分表格失败。请确认光标位于需要成为第二个表格首行的单元格中。", "文档不加班");
+                        return;
                     }
 
-                    progressForm.WaitForUserClose();
+                    int tableCountAfter = doc.Tables?.Count ?? 0;
+                    if (tableCountAfter <= tableCountBefore)
+                    {
+                        MessageBox.Show("拆分表格命令未生成第二个表格。请把光标放到需要成为续表首行的单元格中。", "文档不加班");
+                        return;
+                    }
+
+                    Word.Table continuationTable = FindSplitContinuationTable(doc, sourceTableStart, sourceTableEnd);
+                    if (continuationTable?.Range == null)
+                    {
+                        MessageBox.Show("表格已执行拆分命令，但未找到拆分后的续表。", "文档不加班");
+                        return;
+                    }
+
+                    Word.Table leadingTable = FindPreviousTableBefore(doc, continuationTable.Range.Start, sourceTableStart - 1)
+                        ?? sourceTable;
+                    ApplyLeadingBottomOuterBorder(leadingTable);
+                    ApplyContinuationTopOuterBorder(continuationTable);
+
+                    if (!InsertSimpleContinuationCaptionBeforeTable(doc, continuationTable, baseCaption + "（续）"))
+                    {
+                        MessageBox.Show("表格已拆分，但未能在续表前找到可写入题注的表外段落。", "文档不加班");
+                    }
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"按续表拆分失败: {ex.Message}", "文档不加班");
-            }
-        }
-
-        private static void SplitTableAtCurrentCursor(Word.Application app, Word.Document doc, Word.Selection selection)
-        {
-            if (!TrySplitTableAtSelection(app, doc, selection, out string errorMessage))
-            {
-                MessageBox.Show(errorMessage, "文档不加班");
-                return;
-            }
-
-            MessageBox.Show("表格已按当前光标位置拆分。", "文档不加班");
-        }
-
-        internal static void ExecuteNormalizeTablesAction()
-        {
-            try
-            {
-                Word.Application app = Globals.ThisAddIn.Application;
-                Word.Document doc = app?.ActiveDocument;
-                if (doc == null)
-                {
-                    MessageBox.Show("当前没有活动文档。", "文档不加班");
-                    return;
-                }
-
-                TableFormattingOptions options = GetCurrentTableFormattingOptions();
-
-                using (TableFormattingProgressForm progressForm = new TableFormattingProgressForm())
-                {
-                    progressForm.Show();
-                    progressForm.ReportProgress(3, "正在准备规范表格...", "正在读取目录后的表格范围和当前参数。");
-
-                    try
-                    {
-                        int formattedCount;
-                        using (new WordPerformanceScope(app))
-                        {
-                            formattedCount = NormalizeTables(
-                                app,
-                                doc,
-                                CollectTablesAfterToc(doc),
-                                options,
-                                progressForm,
-                                "目录后的表格");
-                        }
-
-                        if (formattedCount > 0 && !progressForm.IsFinalized)
-                        {
-                            try
-                            {
-                                app.ScreenRefresh();
-                            }
-                            catch
-                            {
-                            }
-
-                            Application.DoEvents();
-                            progressForm.Complete(
-                                $"已完成 {formattedCount} 个表格的规范处理。",
-                                "表头、正文字体、表格宽度和边框已按当前参数统一设置。",
-                                true);
-                        }
-                        else if (!progressForm.IsFinalized)
-                        {
-                            progressForm.Complete(
-                                "未找到可规范的表格。",
-                                "如果文档包含目录，则只会处理目录之后的表格；如果没有目录，则处理全部表格。",
-                                false);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        if (!progressForm.IsFinalized)
-                        {
-                            progressForm.Complete(
-                                "一键规范表格失败。",
-                                ex.Message,
-                                false);
-                        }
-                    }
-
-                    progressForm.WaitForUserClose();
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"一键规范表格失败: {ex.Message}", "文档不加班");
+                MessageBox.Show($"拆分表格失败: {ex.Message}", "文档不加班");
             }
         }
 
@@ -234,750 +133,127 @@ namespace DocuLint
                 }
 
                 TableFormattingOptions options = GetCurrentTableFormattingOptions();
-
-                using (TableFormattingProgressForm progressForm = new TableFormattingProgressForm())
-                {
-                    progressForm.Show();
-                    progressForm.ReportProgress(5, "正在准备规范当前表格...", "正在读取当前选中的表格和规范参数。");
-
-                    try
-                    {
-                        int formattedCount;
-                        using (new WordPerformanceScope(app))
-                        {
-                            formattedCount = NormalizeTables(
-                                app,
-                                doc,
-                                new List<Word.Table> { targetTable },
-                                options,
-                                progressForm,
-                                "当前表格");
-                        }
-
-                        if (formattedCount > 0 && !progressForm.IsFinalized)
-                        {
-                            try
-                            {
-                                app.ScreenRefresh();
-                            }
-                            catch
-                            {
-                            }
-
-                            Application.DoEvents();
-                            progressForm.Complete(
-                                "已完成当前表格的规范处理。",
-                                "表头、正文字体、表格宽度和边框已按当前参数统一设置。",
-                                true);
-                        }
-                        else if (!progressForm.IsFinalized)
-                        {
-                            progressForm.Complete(
-                                "未找到可规范的当前表格。",
-                                "请确认光标位于表格中，或已选中目标表格。",
-                                false);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        if (!progressForm.IsFinalized)
-                        {
-                            progressForm.Complete(
-                                "规范当前表格失败。",
-                                ex.Message,
-                                false);
-                        }
-                    }
-
-                    progressForm.WaitForUserClose();
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"规范当前表格失败: {ex.Message}", "文档不加班");
-            }
-        }
-
-        internal static void ExecuteNormalizeAllImagesAction()
-        {
-            try
-            {
-                Word.Application app = Globals.ThisAddIn.Application;
-                Word.Document doc = app?.ActiveDocument;
-                if (doc == null)
-                {
-                    MessageBox.Show("当前没有活动文档。", "文档不加班");
-                    return;
-                }
-
-                ImageFormattingOptions options = GetCurrentImageFormattingOptions();
-
-                using (ImageFormattingProgressForm progressForm = new ImageFormattingProgressForm())
-                {
-                    progressForm.Show();
-                    progressForm.ReportProgress(3, "正在准备规范图片...", "正在读取主文档中的全部图片和规范参数。");
-
-                    try
-                    {
-                        int formattedCount;
-                        using (new WordPerformanceScope(app))
-                        {
-                            formattedCount = NormalizeAllImages(doc, options, progressForm);
-                        }
-
-                        if (formattedCount > 0 && !progressForm.IsFinalized)
-                        {
-                            try
-                            {
-                                app.ScreenRefresh();
-                            }
-                            catch
-                            {
-                            }
-
-                            Application.DoEvents();
-                            progressForm.Complete(
-                                $"已完成 {formattedCount} 张图片的规范处理。",
-                                "图片缩放比例和所属段落格式已按当前参数统一设置。",
-                                true);
-                        }
-                        else if (!progressForm.IsFinalized)
-                        {
-                            progressForm.Complete(
-                                "未找到可规范的图片。",
-                                "当前只处理主文档正文中的图片对象。",
-                                false);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        if (!progressForm.IsFinalized)
-                        {
-                            progressForm.Complete(
-                                "规范全部图片失败。",
-                                ex.Message,
-                                false);
-                        }
-                    }
-
-                    progressForm.WaitForUserClose();
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"规范全部图片失败: {ex.Message}", "文档不加班");
-            }
-        }
-
-        internal static void ExecuteMergeContinuationTableAction()
-        {
-            try
-            {
-                Word.Application app = Globals.ThisAddIn.Application;
-                Word.Document doc = app?.ActiveDocument;
-                Word.Selection selection = app?.Selection;
-
-                if (doc == null)
-                {
-                    MessageBox.Show("当前没有活动文档。", "文档不加班");
-                    return;
-                }
-
                 using (new WordPerformanceScope(app))
                 {
-                    int mergedCount = MergeSelectedContinuationTable(app, doc, selection);
-                    if (mergedCount > 0)
-                    {
-                        try
-                        {
-                            app.ScreenRefresh();
-                        }
-                        catch
-                        {
-                        }
-
-                        MessageBox.Show("已合并当前续表。", "文档不加班");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"合并续表失败: {ex.Message}", "文档不加班");
-            }
-        }
-
-        private static int MergeSelectedContinuationTable(
-            Word.Application app,
-            Word.Document doc,
-            Word.Selection selection)
-        {
-            if (app == null || doc == null || selection == null)
-            {
-                MessageBox.Show("请先把光标放到要合并的续表中，或选中续表。", "文档不加班");
-                return 0;
-            }
-
-            Word.Table selectedTable = GetTargetTableFromSelection(selection);
-            if (selectedTable?.Range == null)
-            {
-                MessageBox.Show("请先把光标放到要合并的续表中，或选中续表。", "文档不加班");
-                return 0;
-            }
-
-            if (!TryResolveContinuationMergeTables(doc, selectedTable, out Word.Table previousTable, out Word.Table continuationTable))
-            {
-                MessageBox.Show("未找到可合并的续表。请把光标放到续表中，或把光标放到正表中再执行合并。", "文档不加班");
-                return 0;
-            }
-
-            Word.Paragraph continuationCaptionParagraph = GetNearestNonEmptyParagraphBeforeTableParagraph(doc, continuationTable);
-            string continuationCaptionText = continuationCaptionParagraph == null
-                ? string.Empty
-                : NormalizeParagraphText(continuationCaptionParagraph.Range.Text);
-            if (!IsContinuationTableCaption(continuationCaptionText))
-            {
-                MessageBox.Show("当前表格不是续表，无法执行合并续表。请先选中续表，或把光标放到续表中。", "文档不加班");
-                return 0;
-            }
-
-            int rowCount = GetTableRowCount(continuationTable);
-            if (rowCount <= 0)
-            {
-                MessageBox.Show("当前续表为空，无法合并。", "文档不加班");
-                return 0;
-            }
-
-            if (ShouldDeleteContinuationHeaderBeforeMerge(doc, previousTable, continuationTable))
-            {
-                if (rowCount <= 1)
-                {
-                    MessageBox.Show("当前续表没有可保留的正文行，无法合并。", "文档不加班");
-                    return 0;
+                    float tableWidthPoints = ConvertCentimetersToPoints(app, options.TableWidthCentimeters);
+                    FormatSingleTable(doc, targetTable, tableWidthPoints, options);
                 }
 
-                int headerRowCount = GetMergeContinuationHeaderRowCount(doc, previousTable, continuationTable);
-                if (headerRowCount <= 0)
-                {
-                    headerRowCount = 1;
-                }
-
-                headerRowCount = Math.Min(headerRowCount, rowCount - 1);
-                if (!TryDeleteRowBlock(app, continuationTable, 1, headerRowCount))
-                {
-                    MessageBox.Show("删除续表表头失败，未执行合并。", "文档不加班");
-                    return 0;
-                }
-            }
-
-            List<TableHeaderMemoryItem> trailingTableMemories = CaptureTrailingTableHeaderMemories(doc, continuationTable.Range.Start);
-            DeleteParagraphRange(continuationCaptionParagraph);
-            DeleteParagraphBetweenTables(previousTable, continuationTable);
-            RestoreTrailingTableHeaderMemories(doc, trailingTableMemories);
-            Word.Table mergedTable = FindTableContainingPosition(doc, previousTable.Range.Start) ?? previousTable;
-            try
-            {
-                mergedTable.Range.Select();
-            }
-            catch
-            {
                 try
                 {
-                    previousTable.Range.Select();
+                    app.ScreenRefresh();
                 }
                 catch
                 {
                 }
-            }
 
-            return 1;
+                MessageBox.Show("已应用快速表格样式。", "文档不加班");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"快速表格样式失败: {ex.Message}", "文档不加班");
+            }
         }
 
-        private static bool TryResolveContinuationMergeTables(
-            Word.Document doc,
-            Word.Table selectedTable,
-            out Word.Table previousTable,
-            out Word.Table continuationTable)
+        private static void ApplyContinuationTopOuterBorder(Word.Table table)
         {
-            previousTable = null;
-            continuationTable = null;
-
-            if (doc == null || selectedTable?.Range == null)
+            if (table?.Borders == null)
             {
-                return false;
-            }
-
-            Word.Paragraph selectedCaptionParagraph = GetNearestNonEmptyParagraphBeforeTableParagraph(doc, selectedTable);
-            string selectedCaptionText = selectedCaptionParagraph == null
-                ? string.Empty
-                : NormalizeParagraphText(selectedCaptionParagraph.Range.Text);
-
-            if (IsContinuationTableCaption(selectedCaptionText))
-            {
-                continuationTable = selectedTable;
-                previousTable = FindPreviousTableBefore(doc, continuationTable.Range.Start);
-                return previousTable?.Range != null;
-            }
-
-            previousTable = selectedTable;
-            continuationTable = FindNextContinuationTable(doc, selectedTable.Range.End);
-            return continuationTable?.Range != null;
-        }
-
-        private static bool TrySplitTableAtSelection(
-            Word.Application app,
-            Word.Document doc,
-            Word.Selection selection,
-            out string errorMessage)
-        {
-            errorMessage = string.Empty;
-
-            if (app == null || doc == null || selection == null)
-            {
-                errorMessage = "请先把光标放到要拆分的表格中。";
-                return false;
-            }
-
-            if (!IsSelectionInsideTable(selection))
-            {
-                errorMessage = "请先把光标放到要拆分的表格单元格中。";
-                return false;
-            }
-
-            int rowNumber = GetSelectionRowNumber(selection);
-            if (rowNumber <= 1)
-            {
-                errorMessage = "当前光标位于表格第一行，无法按当前位置拆成两个表格。";
-                return false;
-            }
-
-            int tableCountBefore = GetTableCount(doc);
-            int selectionStart = selection.Range?.Start ?? 0;
-
-            try
-            {
-                app.Selection.SplitTable();
-            }
-            catch
-            {
-                if (!TryExecuteNativeSplitTableThroughWordBasic(app))
-                {
-                    throw;
-                }
-            }
-
-            int tableCountAfter = GetTableCount(doc);
-            if (tableCountAfter <= tableCountBefore)
-            {
-                TryExecuteNativeSplitTableThroughWordBasic(app);
-                tableCountAfter = GetTableCount(doc);
-            }
-
-            if (tableCountAfter <= tableCountBefore)
-            {
-                errorMessage = $"拆分表格命令已执行，但文档中的表格数量没有增加。请确认光标在需要成为第二个表格首行的单元格中。光标位置：{selectionStart}";
-                return false;
-            }
-
-            return true;
-        }
-
-        private static int SplitTableAtAutoCrossPagePosition(
-            Word.Application app,
-            Word.Document doc,
-            Word.Selection selection,
-            TableSplitProgressForm progressForm = null)
-        {
-            if (app == null || doc == null || selection == null)
-            {
-                ReportTableSplitIssue(progressForm, "请先把光标放到要拆分的表格中。");
-                return 0;
-            }
-
-            Word.Table targetTable = GetTargetTableFromSelection(selection);
-            if (targetTable?.Range == null)
-            {
-                ReportTableSplitIssue(progressForm, "请先选中跨页表格，或把光标放到跨页表格中。");
-                return 0;
-            }
-
-            progressForm?.ReportProgress(8, "正在检查表格...", "正在确认表格行数和跨页拆分条件。");
-
-            try
-            {
-                if (targetTable.Rows != null && targetTable.Rows.Count <= 5)
-                {
-                    DialogResult result = MessageBox.Show(
-                        "当前选中表格的总行数不大于5行，是否继续进行按续表拆分？",
-                        "文档不加班",
-                        MessageBoxButtons.OKCancel,
-                        MessageBoxIcon.Question);
-                    
-                    if (result != DialogResult.OK)
-                    {
-                        return 0;
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            Word.Paragraph captionParagraph = GetNearestNonEmptyParagraphBeforeTableParagraph(doc, targetTable);
-            string originalCaptionText = captionParagraph == null
-                ? string.Empty
-                : NormalizeParagraphText(captionParagraph.Range.Text);
-            progressForm?.ReportProgress(12, "正在识别表题...", "正在读取原表题，用于生成“表X（续）”。");
-            string baseCaption = ExtractTableCaptionBase(originalCaptionText);
-            if (string.IsNullOrWhiteSpace(baseCaption))
-            {
-                ReportTableSplitIssue(progressForm, "未识别到当前表格的表题，无法生成“表X（续）”。");
-                return 0;
-            }
-
-            int workingTableStart = targetTable.Range.Start;
-            string continuationCaption = baseCaption + "（续）";
-            string captionStyleName = captionParagraph == null
-                ? string.Empty
-                : ResolveStyleName(TryGetParagraphStyle(captionParagraph.Range), doc);
-            Word.Range captionStyleSourceRange = captionParagraph?.Range?.Duplicate;
-            int continuationCount = 0;
-            const int maxSplitRounds = 64;
-
-            for (int round = 0; round < maxSplitRounds; round++)
-            {
-                int basePercent = Math.Min(90, 16 + (round * 10));
-                progressForm?.ReportProgress(
-                    basePercent,
-                    $"正在分析第{round + 1}处跨页位置...",
-                    $"已生成 {continuationCount} 个续表，正在判断当前表格的分页位置。");
-
-                Word.Table currentTable = FindTableContainingPosition(doc, workingTableStart);
-                if (currentTable?.Range == null)
-                {
-                    if (continuationCount == 0)
-                    {
-                        ReportTableSplitIssue(progressForm, "未找到当前需要拆分的表格。");
-                    }
-                    break;
-                }
-
-                if (!TryGetCrossPageSplitCell(currentTable, out Word.Cell splitCell, out string reason))
-                {
-                    if (continuationCount == 0)
-                    {
-                        ReportTableSplitIssue(progressForm, GetCrossPageTableRequiredMessage(reason));
-                    }
-                    break;
-                }
-
-                progressForm?.ReportProgress(
-                    Math.Min(92, basePercent + 3),
-                    $"正在定位第{round + 1}处拆分位置...",
-                    "已找到跨页位置，正在把光标移动到续表首行。");
-
-                try
-                {
-                    Word.Range splitRange = splitCell.Range;
-                    splitRange.Collapse(Word.WdCollapseDirection.wdCollapseStart);
-                    splitRange.Select();
-                }
-                catch (Exception ex)
-                {
-                    ReportTableSplitIssue(progressForm, $"定位拆分位置失败: {ex.Message}");
-                    return continuationCount;
-                }
-
-                progressForm?.ReportProgress(
-                    Math.Min(94, basePercent + 5),
-                    $"正在拆分第{round + 1}个续表...",
-                    "正在执行表格拆分命令。");
-
-                if (!TrySplitTableAtSelection(app, doc, app.Selection, out string splitErrorMessage))
-                {
-                    ReportTableSplitIssue(progressForm, splitErrorMessage);
-                    return continuationCount;
-                }
-
-                Word.Table upperTable = FindTableContainingPosition(doc, workingTableStart);
-                Word.Table continuationTable = FindNextTableAfter(doc, upperTable?.Range?.End ?? workingTableStart);
-                if (upperTable?.Range == null || continuationTable?.Range == null)
-                {
-                    ReportTableSplitIssue(progressForm, "表格已拆分，但未找到续表部分。");
-                    return continuationCount;
-                }
-
-                progressForm?.ReportProgress(
-                    Math.Min(96, basePercent + 7),
-                    $"正在补齐第{round + 1}个续表表头...",
-                    "正在复制原表表头到续表。");
-
-                int effectiveHeaderCount = GetEffectiveHeaderRowCount(doc, currentTable);
-                bool isFirstRound = (round == 0);
-                if (!CopyHeaderRowToContinuationTable(app, upperTable, continuationTable, effectiveHeaderCount, isFirstRound, out string headerCopyMessage))
-                {
-                    ReportTableSplitIssue(progressForm, headerCopyMessage);
-                    return continuationCount;
-                }
-
-                continuationTable = FindNextTableAfter(doc, upperTable.Range.End);
-                if (continuationTable?.Range == null)
-                {
-                    ReportTableSplitIssue(progressForm, "表格已拆分并补齐表头，但未重新找到续表。");
-                    return continuationCount;
-                }
-
-                progressForm?.ReportProgress(
-                    Math.Min(98, basePercent + 9),
-                    $"正在插入第{round + 1}个续表题注...",
-                    "正在写入续表题注并调整分页位置。");
-
-                Word.Range continuationCaptionRange = InsertContinuationCaptionAfterSplit(
-                    app,
-                    continuationTable,
-                    continuationCaption,
-                    captionStyleName,
-                    captionStyleSourceRange);
-                EnsureContinuationCaptionStartsOnNextPage(upperTable, continuationCaptionRange);
-                RememberHeaderRowCount(doc, upperTable, effectiveHeaderCount);
-                RememberHeaderRowCount(doc, continuationTable, effectiveHeaderCount);
-
-                continuationCount++;
-                workingTableStart = continuationTable.Range.Start;
-            }
-
-            return continuationCount;
-        }
-
-        private static void ReportTableSplitIssue(TableSplitProgressForm progressForm, string message)
-        {
-            if (progressForm != null)
-            {
-                progressForm.Complete(message, "请根据提示调整表格或光标位置后重试。", false);
                 return;
             }
 
-            MessageBox.Show(message, "文档不加班");
-        }
-
-        private static string GetCrossPageTableRequiredMessage(string fallbackReason)
-        {
-            return string.IsNullOrWhiteSpace(fallbackReason) || fallbackReason.Contains("跨页") || fallbackReason.Contains("拆分位置")
-                ? "请确认当前表格是跨页表格。只有跨页表格才能按续表拆分。"
-                : fallbackReason;
-        }
-
-        private static bool TryGetCrossPageSplitCell(Word.Table table, out Word.Cell splitCell, out string reason)
-        {
-            splitCell = null;
-            reason = string.Empty;
-
-            if (table?.Range == null)
-            {
-                reason = "请先选中跨页表格，或把光标放到跨页表格中。";
-                return false;
-            }
-
-            int firstPage = GetRangeContentStartPageNumber(table.Range);
-            if (firstPage <= 0)
-            {
-                reason = "无法识别当前表格所在页码。";
-                return false;
-            }
-
-            int rowCount;
-            try
-            {
-                rowCount = table.Rows.Count;
-            }
-            catch
-            {
-                rowCount = 0;
-            }
-
-            if (rowCount <= 1)
-            {
-                reason = "当前表格没有足够的正文行用于续表拆分。";
-                return false;
-            }
-
-            int tableEndPage = GetRangeContentEndPageNumber(table.Range);
-            if (tableEndPage <= firstPage)
-            {
-                reason = "当前表格不是跨页表格。";
-                return false;
-            }
-
-            // 优先通过逐个单元格扫描获取准确的跨页单元格，无论是普通单元格还是纵向合并单元格，都能被精确识别。
-            if (TryGetCrossPageCellByScanningCells(table, firstPage, out Word.Cell exactCrossPageCell))
-            {
-                splitCell = exactCrossPageCell;
-                return true;
-            }
-
-            int firstNextPageRowIndex = TryFindFirstRowStartingAfterPage(table, firstPage, rowCount);
-            if (firstNextPageRowIndex > 0)
-            {
-                int scanStart = Math.Max(2, firstNextPageRowIndex - 2);
-                for (int i = scanStart; i < firstNextPageRowIndex; i++)
-                {
-                    try
-                    {
-                        Word.Row row = table.Rows[i];
-                        if (TryGetCrossPageCellInRow(row, firstPage, out Word.Cell crossPageCell))
-                        {
-                            splitCell = crossPageCell;
-                            return true;
-                        }
-                    }
-                    catch
-                    {
-                    }
-                }
-
-                splitCell = GetFirstCellInRow(table, firstNextPageRowIndex);
-                if (splitCell != null)
-                {
-                    return true;
-                }
-            }
-
-            if (TryGetCrossPageCellByScanningRows(table, firstPage, rowCount, out Word.Cell rowFallbackCell))
-            {
-                splitCell = rowFallbackCell;
-                return true;
-            }
-
-            reason = "当前表格没有找到跨页拆分位置。";
-            return false;
-        }
-
-        private static int TryFindFirstRowStartingAfterPage(Word.Table table, int firstPage, int rowCount)
-        {
-            if (table?.Rows == null || firstPage <= 0 || rowCount <= 1)
-            {
-                return 0;
-            }
-
-            int low = 2;
-            int high = rowCount;
-            int result = 0;
+            Word.WdLineWidth outerWidth = GetTableBorderLineWidth(table, Word.WdBorderType.wdBorderBottom)
+                ?? MapLineWidth(DefaultOuterBorderWidthPt);
+            SetTableBorderLine(table.Borders, Word.WdBorderType.wdBorderTop, outerWidth);
 
             try
             {
-                while (low <= high)
+                foreach (Word.Cell cell in table.Range.Cells)
                 {
-                    int mid = low + ((high - low) / 2);
-                    Word.Row row = table.Rows[mid];
-                    int rowStartPage = GetRangeContentStartPageNumber(row?.Range);
-                    if (rowStartPage <= 0)
+                    if (cell != null && GetCellRowIndex(cell) == 1)
                     {
-                        return 0;
-                    }
-
-                    if (rowStartPage > firstPage)
-                    {
-                        result = mid;
-                        high = mid - 1;
-                    }
-                    else
-                    {
-                        low = mid + 1;
-                    }
-                }
-            }
-            catch
-            {
-                return 0;
-            }
-
-            return result;
-        }
-
-        private static bool TryGetCrossPageCellByScanningRows(
-            Word.Table table,
-            int firstPage,
-            int rowCount,
-            out Word.Cell splitCell)
-        {
-            splitCell = null;
-            if (table?.Rows == null || firstPage <= 0 || rowCount <= 1)
-            {
-                return false;
-            }
-
-            try
-            {
-                for (int i = 2; i <= rowCount; i++)
-                {
-                    Word.Row row = table.Rows[i];
-                    if (row?.Range == null)
-                    {
-                        continue;
-                    }
-
-                    int rowStartPage = GetRangeContentStartPageNumber(row.Range);
-                    if (rowStartPage > firstPage)
-                    {
-                        splitCell = GetFirstCellInRow(table, i);
-                        return splitCell != null;
-                    }
-
-                    if (TryGetCrossPageCellInRow(row, firstPage, out Word.Cell crossPageCell))
-                    {
-                        splitCell = crossPageCell;
-                        return true;
+                        SetCellBorderLine(cell, Word.WdBorderType.wdBorderTop, outerWidth);
                     }
                 }
             }
             catch
             {
             }
-
-            return false;
         }
 
-        private static bool TryGetCrossPageCellByScanningCells(Word.Table table, int firstPage, out Word.Cell splitCell)
+        private static void ApplyLeadingBottomOuterBorder(Word.Table table)
         {
-            splitCell = null;
-            if (table?.Range == null || firstPage <= 0)
+            if (table?.Borders == null)
             {
-                return false;
+                return;
+            }
+
+            Word.WdLineWidth outerWidth = GetTableBorderLineWidth(table, Word.WdBorderType.wdBorderTop)
+                ?? MapLineWidth(DefaultOuterBorderWidthPt);
+            SetTableBorderLine(table.Borders, Word.WdBorderType.wdBorderBottom, outerWidth);
+
+            int lastRowIndex = GetTableRowCount(table);
+            if (lastRowIndex < 1)
+            {
+                return;
             }
 
             try
             {
                 foreach (Word.Cell cell in table.Range.Cells)
                 {
-                    if (cell?.Range == null)
+                    if (cell != null && GetCellRowIndex(cell) == lastRowIndex)
                     {
-                        continue;
-                    }
-
-                    int rowIndex = GetCellRowIndex(cell);
-                    if (rowIndex <= 1)
-                    {
-                        continue;
-                    }
-
-                    int cellStartPage = GetRangeContentStartPageNumber(cell.Range);
-                    int cellEndPage = GetRangeContentEndPageNumber(cell.Range);
-                    if (cellStartPage > firstPage || (cellStartPage <= firstPage && cellEndPage > firstPage))
-                    {
-                        splitCell = cellStartPage > firstPage
-                            ? GetFirstCellInRow(table, rowIndex) ?? cell
-                            : cell;
-                        return true;
+                        SetCellBorderLine(cell, Word.WdBorderType.wdBorderBottom, outerWidth);
                     }
                 }
             }
             catch
             {
             }
-
-            return false;
         }
 
-        private static int GetCellRowIndex(Word.Cell cell)
+        private static Word.WdLineWidth? GetTableBorderLineWidth(Word.Table table, Word.WdBorderType borderType)
+        {
+            if (table?.Borders == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                Word.Border border = table.Borders[borderType];
+                if (border != null && border.LineStyle != Word.WdLineStyle.wdLineStyleNone)
+                {
+                    return border.LineWidth;
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private static bool TryExecuteNativeSplitTable(Word.Selection selection)
+        {
+            if (selection == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                selection.SplitTable();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+                                                                private static int GetCellRowIndex(Word.Cell cell)
         {
             if (cell == null)
             {
@@ -1011,62 +287,7 @@ namespace DocuLint
             }
         }
 
-        private static bool TryGetCrossPageCellInRow(Word.Row row, int firstPage, out Word.Cell crossPageCell)
-        {
-            crossPageCell = null;
-            if (row?.Range == null || firstPage <= 0)
-            {
-                return false;
-            }
-
-            try
-            {
-                int rowStartPage = GetRangeContentStartPageNumber(row.Range);
-                int rowEndPage = GetRangeContentEndPageNumber(row.Range);
-
-                if (rowStartPage <= firstPage && rowEndPage > firstPage)
-                {
-                    try
-                    {
-                        if (row.Cells != null && row.Cells.Count > 0)
-                        {
-                            crossPageCell = row.Cells[1];
-                            return true;
-                        }
-                    }
-                    catch
-                    {
-                    }
-                }
-
-                if (row.Cells != null)
-                {
-                    for (int i = 1; i <= row.Cells.Count; i++)
-                    {
-                        Word.Cell cell = row.Cells[i];
-                        if (cell?.Range == null)
-                        {
-                            continue;
-                        }
-
-                        int cellStartPage = GetRangeContentStartPageNumber(cell.Range);
-                        int cellEndPage = GetRangeContentEndPageNumber(cell.Range);
-                        if (cellStartPage <= firstPage && cellEndPage > firstPage)
-                        {
-                            crossPageCell = cell;
-                            return true;
-                        }
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            return false;
-        }
-
-        private static Word.Cell GetFirstCellInRow(Word.Table table, int rowIndex)
+                private static Word.Cell GetFirstCellInRow(Word.Table table, int rowIndex)
         {
             if (table == null || rowIndex < 1)
             {
@@ -1159,127 +380,7 @@ namespace DocuLint
             }
         }
 
-        private static int GetTableCount(Word.Document doc)
-        {
-            if (doc == null)
-            {
-                return 0;
-            }
-
-            try
-            {
-                return doc.Tables?.Count ?? 0;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-
-        private static bool TryExecuteNativeSplitTableThroughWordBasic(Word.Application app)
-        {
-            if (app == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                object wordBasic = app.WordBasic;
-                wordBasic.GetType().InvokeMember(
-                    "TableSplitTable",
-                    BindingFlags.InvokeMethod,
-                    null,
-                    wordBasic,
-                    null);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static void SplitSelectedCrossPageTable(Word.Application app, Word.Document doc, Word.Selection selection)
-        {
-            if (app == null)
-            {
-                MessageBox.Show("当前没有活动的 Word 应用。", "文档不加班");
-                return;
-            }
-
-            Word.Table targetTable = GetTargetTableFromSelection(selection);
-            if (targetTable?.Range == null)
-            {
-                MessageBox.Show("请先选中跨页表格，或把光标放到跨页表格中。", "文档不加班");
-                return;
-            }
-
-            if (!IsCrossPageTable(targetTable))
-            {
-                MessageBox.Show("当前选中的表格不是跨页表格。", "文档不加班");
-                return;
-            }
-
-            if (!TryGetTableSplitRowIndex(targetTable, out int splitRowIndex))
-            {
-                MessageBox.Show("当前跨页表格的分页发生在单行内部，暂不支持按续表拆分。", "文档不加班");
-                return;
-            }
-
-            Word.Paragraph captionParagraph = GetNearestNonEmptyParagraphBeforeTableParagraph(doc, targetTable);
-            string originalCaptionText = captionParagraph == null
-                ? string.Empty
-                : NormalizeParagraphText(captionParagraph.Range.Text);
-            string baseCaption = ExtractTableCaptionBase(originalCaptionText);
-            if (string.IsNullOrWhiteSpace(baseCaption))
-            {
-                MessageBox.Show("未识别到当前表格的表题，无法生成“表X（续）”。", "文档不加班");
-                return;
-            }
-
-            string continuationCaption = baseCaption + "（续）";
-            string captionStyleName = captionParagraph == null
-                ? string.Empty
-                : ResolveStyleName(TryGetParagraphStyle(captionParagraph.Range), doc);
-
-            int originalTableStart = targetTable.Range.Start;
-            int splitRowStart = 0;
-            try
-            {
-                Word.Row splitRow = targetTable.Rows[splitRowIndex];
-                splitRowStart = splitRow.Range.Start;
-                Word.Range splitRange = splitRow.Cells[1].Range;
-                splitRange.Collapse(Word.WdCollapseDirection.wdCollapseStart);
-                splitRange.Select();
-                app.Selection.SplitTable();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"拆分表格失败: {ex.Message}", "文档不加班");
-                return;
-            }
-
-            Word.Table firstTable = FindTableContainingPosition(doc, originalTableStart);
-            Word.Table continuationTable = FindNextTableAfter(doc, firstTable?.Range?.End ?? splitRowStart);
-            if (firstTable?.Range == null || continuationTable?.Range == null)
-            {
-                MessageBox.Show("表格拆分后未找到续表部分。", "文档不加班");
-                return;
-            }
-
-            InsertContinuationCaptionBetweenTables(doc, firstTable, continuationTable, continuationCaption, captionStyleName);
-            int manualHeaderCount = GetEffectiveHeaderRowCount(doc, targetTable);
-            CopyHeaderRowToContinuationTable(app, firstTable, continuationTable, manualHeaderCount, true, out _);
-            RememberHeaderRowCount(doc, firstTable, manualHeaderCount);
-            RememberHeaderRowCount(doc, continuationTable, manualHeaderCount);
-            MarkTopRowsAsHeading(firstTable, manualHeaderCount);
-            MarkTopRowsAsHeading(continuationTable, manualHeaderCount);
-
-            continuationTable.Select();
-        }
-
-        private static Word.Table GetTargetTableFromSelection(Word.Selection selection)
+                                private static Word.Table GetTargetTableFromSelection(Word.Selection selection)
         {
             if (selection == null)
             {
@@ -1371,9 +472,40 @@ namespace DocuLint
             return null;
         }
 
-        private static Word.Table FindPreviousTableBefore(Word.Document doc, int position)
+        private static Word.Table FindSplitContinuationTable(Word.Document doc, int sourceTableStart, int sourceTableEnd)
         {
-            if (doc == null)
+            if (doc?.Tables == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                for (int i = 1; i <= doc.Tables.Count; i++)
+                {
+                    Word.Table table = doc.Tables[i];
+                    if (table?.Range == null)
+                    {
+                        continue;
+                    }
+
+                    int start = table.Range.Start;
+                    if (start > sourceTableStart && start <= sourceTableEnd + 64)
+                    {
+                        return table;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private static Word.Table FindPreviousTableBefore(Word.Document doc, int position, int minStart)
+        {
+            if (doc?.Tables == null || position <= 0)
             {
                 return null;
             }
@@ -1388,12 +520,11 @@ namespace DocuLint
                         continue;
                     }
 
-                    if (table.Range.Start >= position)
+                    int start = table.Range.Start;
+                    if (start >= minStart && start < position)
                     {
-                        break;
+                        previousTable = table;
                     }
-
-                    previousTable = table;
                 }
             }
             catch
@@ -1403,7 +534,7 @@ namespace DocuLint
             return previousTable;
         }
 
-        private static int GetTableRowCount(Word.Table table)
+                private static int GetTableRowCount(Word.Table table)
         {
             try
             {
@@ -1623,74 +754,125 @@ namespace DocuLint
                 : string.Empty;
         }
 
-        private static void InsertContinuationCaptionBetweenTables(
+        private static bool InsertSimpleContinuationCaptionBeforeTable(
             Word.Document doc,
-            Word.Table firstTable,
             Word.Table continuationTable,
-            string continuationCaption,
-            string captionStyleName)
+            string continuationCaption)
         {
             if (doc == null
-                || firstTable?.Range == null
                 || continuationTable?.Range == null
                 || string.IsNullOrWhiteSpace(continuationCaption))
             {
-                return;
+                return false;
+            }
+
+            Word.Range paragraphRange = GetExistingExternalParagraphBeforeTable(continuationTable);
+            if (paragraphRange == null)
+            {
+                return false;
+            }
+
+            int paragraphStart = paragraphRange.Start;
+            Word.Range textRange = paragraphRange.Duplicate;
+            if (textRange.End > textRange.Start)
+            {
+                textRange.End -= 1;
+            }
+
+            textRange.Text = continuationCaption;
+
+            Word.Range formattedRange = doc.Range(
+                paragraphStart,
+                Math.Min(doc.Content.End, paragraphStart + continuationCaption.Length + 1));
+            formattedRange.Font.NameFarEast = "黑体";
+            formattedRange.Font.Name = "黑体";
+            formattedRange.Font.Size = 12f;
+            formattedRange.Font.Bold = 0;
+            formattedRange.ParagraphFormat.Alignment = Word.WdParagraphAlignment.wdAlignParagraphCenter;
+            formattedRange.ParagraphFormat.SpaceBefore = 0f;
+            formattedRange.ParagraphFormat.SpaceAfter = 0f;
+            formattedRange.ParagraphFormat.KeepWithNext = -1;
+            formattedRange.ParagraphFormat.KeepTogether = -1;
+            EnsureCaptionOnSamePageAsContinuationTable(doc, formattedRange, continuationTable);
+            return true;
+        }
+
+        private static Word.Range GetExistingExternalParagraphBeforeTable(Word.Table table)
+        {
+            if (table?.Range == null)
+            {
+                return null;
             }
 
             try
             {
-                Word.Range betweenRange = doc.Range(firstTable.Range.End, continuationTable.Range.Start);
-                if (betweenRange == null)
+                Word.Range lookupRange = table.Range.Duplicate;
+                lookupRange.Collapse(Word.WdCollapseDirection.wdCollapseStart);
+                lookupRange.MoveStart(Word.WdUnits.wdCharacter, -1);
+
+                Word.Paragraphs paragraphs = lookupRange.Paragraphs;
+                if (paragraphs == null)
                 {
-                    return;
+                    return null;
                 }
 
-                betweenRange.Text = "\f" + continuationCaption + "\r";
-                Word.Range captionRange = doc.Range(firstTable.Range.End + 1, continuationTable.Range.Start);
-
-                if (!string.IsNullOrWhiteSpace(captionStyleName)
-                    && captionRange.Paragraphs != null
-                    && captionRange.Paragraphs.Count > 0)
+                for (int i = paragraphs.Count; i >= 1; i--)
                 {
-                    TrySetStyle(captionRange.Paragraphs[1].Range, captionStyleName);
+                    Word.Range paragraphRange = paragraphs[i]?.Range;
+                    if (paragraphRange == null || IsRangeInsideTable(paragraphRange))
+                    {
+                        continue;
+                    }
+
+                    if (paragraphRange.End <= table.Range.Start)
+                    {
+                        return paragraphRange;
+                    }
                 }
             }
             catch
             {
             }
+
+            return null;
         }
 
-        private static void InsertContinuationCaptionBeforeTable(
-            Word.Application app,
-            Word.Table firstTable,
-            Word.Table continuationTable,
-            string continuationCaption,
-            string captionStyleName,
-            Word.Range captionStyleSourceRange)
+        private static bool IsRangeInsideTable(Word.Range range)
         {
-            if (app == null || continuationTable?.Range == null || string.IsNullOrWhiteSpace(continuationCaption))
+            if (range == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                return Convert.ToBoolean(range.Information[Word.WdInformation.wdWithInTable]);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void EnsureCaptionOnSamePageAsContinuationTable(
+            Word.Document doc,
+            Word.Range captionRange,
+            Word.Table continuationTable)
+        {
+            if (doc == null || captionRange == null || continuationTable?.Range == null)
             {
                 return;
             }
 
             try
             {
-                continuationTable.Range.InsertParagraphBefore();
-                Word.Paragraph captionParagraph = FindParagraphImmediatelyBeforeTable(continuationTable);
-                Word.Range captionRange = captionParagraph?.Range;
-                if (captionRange == null)
+                doc.Repaginate();
+                int captionPage = GetRangeStartPageNumber(captionRange);
+                int tablePage = GetRangeContentStartPageNumber(continuationTable.Range);
+                if (captionPage > 0 && tablePage > 0 && captionPage < tablePage)
                 {
-                    return;
+                    captionRange.ParagraphFormat.PageBreakBefore = -1;
                 }
-
-                captionRange.Text = continuationCaption + "\r";
-                Word.Range textRange = captionRange.Duplicate;
-                textRange.End = Math.Max(textRange.Start, textRange.End - 1);
-
-                ApplyCaptionFormatting(captionStyleSourceRange, textRange, captionStyleName);
-                textRange.ParagraphFormat.Alignment = Word.WdParagraphAlignment.wdAlignParagraphCenter;
-                textRange.ParagraphFormat.PageBreakBefore = NeedsPageBreakBeforeContinuationCaption(firstTable, textRange) ? -1 : 0;
             }
             catch
             {
@@ -1748,85 +930,7 @@ namespace DocuLint
             }
         }
 
-        private void button20_Click(object sender, RibbonControlEventArgs e)
-        {
-            try
-            {
-                Word.Application app = Globals.ThisAddIn.Application;
-                Word.Document doc = app?.ActiveDocument;
-                Word.Selection selection = app?.Selection;
-                if (doc == null || selection?.Range == null)
-                {
-                    MessageBox.Show("请先在表格中选中表头区域。", "文档不加班");
-                    return;
-                }
-
-                Word.Table targetTable = GetTargetTableFromSelection(selection);
-                if (targetTable?.Range == null)
-                {
-                    MessageBox.Show("请先在需要拆分的表格中选中表头区域。", "文档不加班");
-                    return;
-                }
-
-                int manualHeaderRowCount = GetSelectedHeaderRowCount(selection, targetTable);
-                if (manualHeaderRowCount < 1)
-                {
-                    MessageBox.Show("未识别到有效的表头选区，请重新选择。", "文档不加班");
-                    return;
-                }
-
-                RememberHeaderRowCount(doc, targetTable, manualHeaderRowCount);
-                MessageBox.Show($"已将当前表格表头设置为前 {manualHeaderRowCount} 行。", "文档不加班");
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"设置表头失败: {ex.Message}", "文档不加班");
-            }
-        }
-
-        private static Word.Range InsertContinuationCaptionAfterSplit(
-            Word.Application app,
-            Word.Table continuationTable,
-            string continuationCaption,
-            string captionStyleName,
-            Word.Range captionStyleSourceRange)
-        {
-            if (app == null || continuationTable?.Range == null || string.IsNullOrWhiteSpace(continuationCaption))
-            {
-                return null;
-            }
-
-            try
-            {
-                continuationTable.Select();
-                Word.Selection selection = app.Selection;
-                if (selection == null)
-                {
-                    return null;
-                }
-
-                selection.Collapse(Word.WdCollapseDirection.wdCollapseStart);
-                selection.MoveLeft(Word.WdUnits.wdCharacter, 1);
-                selection.TypeText(continuationCaption);
-
-                Word.Range captionRange = selection.Range.Duplicate;
-                if (captionRange.Start >= continuationCaption.Length)
-                {
-                    captionRange.Start -= continuationCaption.Length;
-                }
-
-                DeleteOneLineBreakBeforeRange(captionRange);
-                ApplyCaptionFormatting(captionStyleSourceRange, captionRange, captionStyleName);
-                captionRange.ParagraphFormat.Alignment = Word.WdParagraphAlignment.wdAlignParagraphCenter;
-                return captionRange;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static void EnsureContinuationCaptionStartsOnNextPage(Word.Table firstTable, Word.Range captionRange)
+                private static void EnsureContinuationCaptionStartsOnNextPage(Word.Table firstTable, Word.Range captionRange)
         {
             if (firstTable?.Range == null || captionRange == null)
             {
@@ -1891,171 +995,7 @@ namespace DocuLint
             }
         }
 
-        private static bool CopyHeaderRowToContinuationTable(
-            Word.Application app,
-            Word.Table sourceTable,
-            Word.Table continuationTable,
-            int headerRowCount,
-            bool isFirstRound,
-            out string message)
-        {
-            message = string.Empty;
-            if (sourceTable?.Rows == null
-                || sourceTable.Rows.Count < 1
-                || continuationTable?.Rows == null
-                || continuationTable.Rows.Count < 1)
-            {
-                message = "未找到可复制的标题行或续表。";
-                return false;
-            }
-
-            try
-            {
-                if (app == null)
-                {
-                    message = "当前没有活动的 Word 应用，无法复制标题行。";
-                    return false;
-                }
-
-                Word.Document doc = app.ActiveDocument;
-                if (doc == null)
-                {
-                    message = "当前没有活动文档。";
-                    return false;
-                }
-
-                Word.Selection selection = app.Selection;
-                if (selection == null)
-                {
-                    message = "无法获取当前 Word 选区。";
-                    return false;
-                }
-
-                if (headerRowCount < 1)
-                {
-                    message = "无法识别正表标题行数。";
-                    return false;
-                }
-
-                int continuationTableStart = continuationTable.Range.Start;
-
-                // 核心前提：在继续处理第一页之前，必须先在续表前面插入两个换行符作为隔离保护
-                Word.Paragraph paragraphBeforeContinuation = FindParagraphImmediatelyBeforeTable(continuationTable);
-                Word.Range separatorAnchor = paragraphBeforeContinuation?.Range?.Duplicate;
-                if (separatorAnchor == null)
-                {
-                    message = "无法定位续表前的插入位置。";
-                    return false;
-                }
-                separatorAnchor.InsertParagraphBefore();
-                separatorAnchor.InsertParagraphBefore();
-
-                if (isFirstRound)
-                {
-                    int bodyStartRow = headerRowCount + 1;
-                    bool needsFirstPageSplit = sourceTable.Rows.Count >= bodyStartRow;
-                    int sourceTableStart = sourceTable.Range.Start;
-
-                    Word.Table headerOnlyTable = null;
-                    Word.Table bodyPage1Table = null;
-
-                    if (needsFirstPageSplit)
-                    {
-                        Word.Cell splitCell = GetFirstCellInRow(sourceTable, bodyStartRow);
-                        if (splitCell == null)
-                        {
-                            message = "无法定位第一页正文的首个单元格进行拆分。";
-                            return false;
-                        }
-
-                        Word.Range splitRange = splitCell.Range;
-                        splitRange.Collapse(Word.WdCollapseDirection.wdCollapseStart);
-                        splitRange.Select();
-
-                        if (!TrySplitTableAtSelection(app, doc, selection, out string splitError))
-                        {
-                            message = "拆分表头和正文失败：" + splitError;
-                            return false;
-                        }
-
-                        headerOnlyTable = FindTableContainingPosition(doc, sourceTableStart);
-                        bodyPage1Table = FindNextTableAfter(doc, headerOnlyTable?.Range?.End ?? sourceTableStart);
-
-                        if (headerOnlyTable == null || bodyPage1Table == null)
-                        {
-                            message = "拆分表头和正文后无法重新获取表格。";
-                            return false;
-                        }
-                    }
-                    else
-                    {
-                        headerOnlyTable = sourceTable;
-                    }
-
-                    // 复制表头（此时表头独占一个表格）
-                    headerOnlyTable.Select();
-                    selection.Copy();
-
-                    // 还原第一页（如果发生过拆分）：删除第一页表头和正文之间的空白行
-                    if (needsFirstPageSplit && headerOnlyTable != null && bodyPage1Table != null)
-                    {
-                        DeleteParagraphBetweenTables(headerOnlyTable, bodyPage1Table);
-                    }
-                }
-
-                // 重新获取续表（前面的文档结构变动可能导致原 COM 对象或范围失效）
-                Word.Table restoredContinuationTable = FindTableContainingPosition(doc, continuationTableStart) ?? FindNextTableAfter(doc, sourceTable.Range.End);
-                if (restoredContinuationTable == null)
-                {
-                    // 若定位不到，可以回退到原本的 continuationTable
-                    restoredContinuationTable = continuationTable;
-                }
-
-                Word.Paragraph headerPasteParagraph = FindParagraphBeforeTable(restoredContinuationTable, 1);
-                if (headerPasteParagraph?.Range == null)
-                {
-                    message = "无法定位靠近续表的粘贴段落。";
-                    return false;
-                }
-
-                Word.Range headerPasteRange = headerPasteParagraph.Range.Duplicate;
-                headerPasteRange.Collapse(Word.WdCollapseDirection.wdCollapseStart);
-                selection.SetRange(headerPasteRange.Start, headerPasteRange.Start);
-                
-                if (!TryPasteKeepSourceFormatting(selection))
-                {
-                    message = "无法将表头粘贴到第二页。";
-                    return false;
-                }
-
-                Word.Table pastedHeaderTable = GetTargetTableFromSelection(selection);
-                if (pastedHeaderTable?.Range == null)
-                {
-                    message = "已复制表头，但未找到新插入的表格。";
-                    return false;
-                }
-
-                Word.Table continuationTableAfter = FindNextTableAfter(doc, pastedHeaderTable.Range.End);
-                if (continuationTableAfter?.Range == null)
-                {
-                    message = "粘贴表头后未找到原始续表。";
-                    return false;
-                }
-
-                MarkTopRowsAsHeading(pastedHeaderTable, headerRowCount);
-                MarkTopRowsAsHeading(continuationTableAfter, headerRowCount);
-                DeleteParagraphBetweenTables(pastedHeaderTable, continuationTableAfter);
-
-                return true;
-            }
-            catch (Exception ex)
-            {
-                message = "复制标题行失败: " + ex.Message;
-                return false;
-            }
-        }
-
-        private static Word.Cell GetTopLeftCell(Word.Table table)
+                private static Word.Cell GetTopLeftCell(Word.Table table)
         {
             if (table?.Range?.Cells == null)
             {
@@ -2116,42 +1056,7 @@ namespace DocuLint
             }
         }
 
-        private static bool TrySelectTopRows(Word.Table table, Word.Selection selection, int rowCount)
-        {
-            if (table?.Range?.Cells == null || selection == null || rowCount < 1)
-            {
-                return false;
-            }
-
-            try
-            {
-                Word.Cell topLeftCell = GetTopLeftCell(table);
-                if (topLeftCell?.Range == null)
-                {
-                    return false;
-                }
-
-                Word.Range anchor = topLeftCell.Range.Duplicate;
-                anchor.Collapse(Word.WdCollapseDirection.wdCollapseStart);
-                anchor.Select();
-
-                for (int i = 0; i < rowCount; i++)
-                {
-                    if (!TryExtendSelectionToNextRow(selection, i == 0))
-                    {
-                        return false;
-                    }
-                }
-
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static int GetNativeHeaderRowCount(Word.Table table)
+                private static int GetNativeHeaderRowCount(Word.Table table)
         {
             if (table?.Rows == null)
             {
@@ -2276,493 +1181,7 @@ namespace DocuLint
 
         private static int GetEffectiveHeaderRowCount(Word.Document doc, Word.Table table)
         {
-            if (doc != null && table?.Range != null && TryGetManualHeaderOverride(doc, table, out int manualRowCount))
-            {
-                return manualRowCount;
-            }
-
             return GetNormalizedHeaderRowCount(table);
-        }
-
-        private static int GetSelectedHeaderRowCount(Word.Selection selection, Word.Table table)
-        {
-            if (selection?.Range == null || table?.Range?.Cells == null)
-            {
-                return 0;
-            }
-
-            int selectionStart = selection.Range.Start;
-            int selectionEnd = selection.Range.End;
-            int maxRow = 0;
-            bool hasAny = false;
-
-            try
-            {
-                foreach (Word.Cell cell in table.Range.Cells)
-                {
-                    if (cell?.Range == null)
-                    {
-                        continue;
-                    }
-
-                    int cellStart = cell.Range.Start;
-                    int cellEnd = cell.Range.End;
-                    bool intersects = cellStart < selectionEnd && cellEnd > selectionStart;
-                    if (!intersects)
-                    {
-                        continue;
-                    }
-
-                    int rowIndex = GetCellRowIndex(cell);
-                    if (rowIndex <= 0)
-                    {
-                        continue;
-                    }
-
-                    hasAny = true;
-                    if (rowIndex > maxRow)
-                    {
-                        maxRow = rowIndex;
-                    }
-                }
-            }
-            catch
-            {
-                return 0;
-            }
-
-            if (!hasAny || maxRow < 1)
-            {
-                return 0;
-            }
-
-            int safeTotalRows = table.Rows?.Count ?? maxRow;
-            if (maxRow > safeTotalRows)
-            {
-                maxRow = safeTotalRows;
-            }
-
-            return maxRow;
-        }
-
-        private static void SaveManualHeaderOverride(Word.Document doc, Word.Table table, int headerRowCount)
-        {
-            RememberHeaderRowCount(doc, table, headerRowCount);
-        }
-
-        private sealed class TableHeaderMemoryItem
-        {
-            public Word.Table Table { get; set; }
-            public int HeaderRowCount { get; set; }
-        }
-
-        private static void RememberHeaderRowCount(Word.Document doc, Word.Table table, int headerRowCount)
-        {
-            if (doc == null || table?.Range == null || headerRowCount < 1)
-            {
-                return;
-            }
-
-            string docKey = GetDocumentOverrideKey(doc);
-            if (string.IsNullOrWhiteSpace(docKey))
-            {
-                return;
-            }
-
-            if (!ManualHeaderRowOverridesByDocument.TryGetValue(docKey, out Dictionary<int, int> tableMap))
-            {
-                tableMap = new Dictionary<int, int>();
-                ManualHeaderRowOverridesByDocument[docKey] = tableMap;
-            }
-
-            tableMap[table.Range.Start] = headerRowCount;
-        }
-
-        private static bool TryGetManualHeaderOverride(Word.Document doc, Word.Table table, out int headerRowCount)
-        {
-            headerRowCount = 0;
-            if (doc == null || table?.Range == null)
-            {
-                return false;
-            }
-
-            string docKey = GetDocumentOverrideKey(doc);
-            if (string.IsNullOrWhiteSpace(docKey))
-            {
-                return false;
-            }
-
-            if (!ManualHeaderRowOverridesByDocument.TryGetValue(docKey, out Dictionary<int, int> tableMap) || tableMap == null)
-            {
-                return false;
-            }
-
-            if (!tableMap.TryGetValue(table.Range.Start, out int manualRowCount) || manualRowCount < 1)
-            {
-                return false;
-            }
-
-            int totalRows = GetTableRowCountSafe(table, manualRowCount);
-            headerRowCount = Math.Min(manualRowCount, Math.Max(1, totalRows));
-            return true;
-        }
-
-        private static int NormalizeTables(
-            Word.Application app,
-            Word.Document doc,
-            IList<Word.Table> tables,
-            TableFormattingOptions options,
-            TableFormattingProgressForm progressForm,
-            string scopeLabel)
-        {
-            if (app == null || doc == null || options == null || tables == null)
-            {
-                return 0;
-            }
-
-            List<Word.Table> validTables = tables
-                .Where(table => table?.Range != null)
-                .ToList();
-            if (validTables.Count == 0)
-            {
-                return 0;
-            }
-
-            float tableWidthPoints = ConvertCentimetersToPoints(app, options.TableWidthCentimeters);
-            for (int i = 0; i < validTables.Count; i++)
-            {
-                Word.Table table = validTables[i];
-
-                int percent = Math.Min(96, 5 + (int)Math.Round(((i + 1) * 90d) / Math.Max(1, validTables.Count)));
-                progressForm?.ReportProgress(
-                    percent,
-                    $"正在规范第 {i + 1} / {validTables.Count} 个表格...",
-                    $"正在统一{scopeLabel}的表头、正文、宽度和边框。");
-
-                FormatSingleTable(doc, table, tableWidthPoints, options);
-            }
-
-            return validTables.Count;
-        }
-
-        private static List<Word.Table> CollectTablesAfterToc(Word.Document doc)
-        {
-            List<Word.Table> tables = new List<Word.Table>();
-            if (doc == null)
-            {
-                return tables;
-            }
-
-            int scanStart = GetScanStartAfterToc(doc);
-            try
-            {
-                foreach (Word.Table table in doc.Tables)
-                {
-                    if (table?.Range == null)
-                    {
-                        continue;
-                    }
-
-                    if (scanStart > 0 && table.Range.End <= scanStart)
-                    {
-                        continue;
-                    }
-
-                    tables.Add(table);
-                }
-            }
-            catch
-            {
-            }
-
-            return tables;
-        }
-
-        private static int NormalizeAllImages(
-            Word.Document doc,
-            ImageFormattingOptions options,
-            ImageFormattingProgressForm progressForm)
-        {
-            if (doc == null || options == null)
-            {
-                return 0;
-            }
-
-            List<Action> imageActions = CollectImageFormattingActions(doc, options);
-            if (imageActions.Count == 0)
-            {
-                return 0;
-            }
-
-            for (int i = 0; i < imageActions.Count; i++)
-            {
-                int percent = Math.Min(96, 5 + (int)Math.Round(((i + 1) * 90d) / Math.Max(1, imageActions.Count)));
-                progressForm?.ReportProgress(
-                    percent,
-                    $"正在规范第 {i + 1} / {imageActions.Count} 张图片...",
-                    "正在统一图片缩放比例，并整理所属段落格式。");
-
-                imageActions[i]?.Invoke();
-            }
-
-            return imageActions.Count;
-        }
-
-        private static List<Action> CollectImageFormattingActions(Word.Document doc, ImageFormattingOptions options)
-        {
-            List<Action> actions = new List<Action>();
-            if (doc == null || options == null)
-            {
-                return actions;
-            }
-
-            try
-            {
-                foreach (Word.InlineShape inlineShape in doc.InlineShapes)
-                {
-                    if (!IsPictureInlineShape(inlineShape) || IsRangeOnFirstPage(inlineShape.Range))
-                    {
-                        continue;
-                    }
-
-                    actions.Add(() => FormatInlineShape(inlineShape, options));
-                }
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                foreach (Word.Shape shape in doc.Shapes)
-                {
-                    if (!IsPictureShape(shape) || IsRangeOnFirstPage(shape.Anchor))
-                    {
-                        continue;
-                    }
-
-                    actions.Add(() => FormatShape(shape, options));
-                }
-            }
-            catch
-            {
-            }
-
-            return actions;
-        }
-
-        private static bool IsRangeOnFirstPage(Word.Range range)
-        {
-            if (range == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                int startPage = GetRangeContentStartPageNumber(range);
-                return startPage == 1;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static bool IsPictureInlineShape(Word.InlineShape inlineShape)
-        {
-            if (inlineShape == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                switch (inlineShape.Type)
-                {
-                    case Word.WdInlineShapeType.wdInlineShapePicture:
-                    case Word.WdInlineShapeType.wdInlineShapeLinkedPicture:
-                        return true;
-                    case Word.WdInlineShapeType.wdInlineShapeEmbeddedOLEObject:
-                    case Word.WdInlineShapeType.wdInlineShapeLinkedOLEObject:
-                        return IsVisioOleObject(inlineShape.OLEFormat);
-                }
-            }
-            catch
-            {
-            }
-
-            return false;
-        }
-
-        private static bool IsPictureShape(Word.Shape shape)
-        {
-            if (shape == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                return shape.Type == Office.MsoShapeType.msoPicture
-                    || shape.Type == Office.MsoShapeType.msoLinkedPicture
-                    || ((shape.Type == Office.MsoShapeType.msoEmbeddedOLEObject
-                        || shape.Type == Office.MsoShapeType.msoLinkedOLEObject)
-                        && IsVisioOleObject(shape.OLEFormat));
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static bool IsVisioOleObject(Word.OLEFormat oleFormat)
-        {
-            if (oleFormat == null)
-            {
-                return false;
-            }
-
-            try
-            {
-                string progId = oleFormat.ProgID ?? string.Empty;
-                if (progId.IndexOf("Visio", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    return true;
-                }
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                string classType = oleFormat.ClassType ?? string.Empty;
-                return classType.IndexOf("Visio", StringComparison.OrdinalIgnoreCase) >= 0;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static void FormatInlineShape(Word.InlineShape inlineShape, ImageFormattingOptions options)
-        {
-            if (inlineShape == null || options == null)
-            {
-                return;
-            }
-
-            try
-            {
-                inlineShape.LockAspectRatio = Office.MsoTriState.msoTrue;
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                inlineShape.ScaleHeight = options.ScalePercent;
-                inlineShape.ScaleWidth = options.ScalePercent;
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                ApplyParagraphFormatting(inlineShape.Range?.ParagraphFormat);
-            }
-            catch
-            {
-            }
-        }
-
-        private static void FormatShape(Word.Shape shape, ImageFormattingOptions options)
-        {
-            if (shape == null || options == null)
-            {
-                return;
-            }
-
-            try
-            {
-                shape.LockAspectRatio = Office.MsoTriState.msoTrue;
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                shape.ScaleHeight(options.ScalePercent, Office.MsoTriState.msoFalse, Office.MsoScaleFrom.msoScaleFromTopLeft);
-                shape.ScaleWidth(options.ScalePercent, Office.MsoTriState.msoFalse, Office.MsoScaleFrom.msoScaleFromTopLeft);
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                shape.RelativeHorizontalPosition = Word.WdRelativeHorizontalPosition.wdRelativeHorizontalPositionMargin;
-                shape.Left = (float)Word.WdShapePosition.wdShapeCenter;
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                ApplyParagraphFormatting(shape.Anchor?.ParagraphFormat);
-            }
-            catch
-            {
-            }
-        }
-
-        private static void ApplyParagraphFormatting(Word.ParagraphFormat paragraphFormat)
-        {
-            if (paragraphFormat == null)
-            {
-                return;
-            }
-
-            try
-            {
-                paragraphFormat.Alignment = Word.WdParagraphAlignment.wdAlignParagraphCenter;
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                paragraphFormat.LineSpacingRule = Word.WdLineSpacing.wdLineSpaceSingle;
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                paragraphFormat.LeftIndent = 0f;
-                paragraphFormat.RightIndent = 0f;
-                paragraphFormat.FirstLineIndent = 0f;
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                paragraphFormat.CharacterUnitLeftIndent = 0f;
-                paragraphFormat.CharacterUnitRightIndent = 0f;
-                paragraphFormat.CharacterUnitFirstLineIndent = 0f;
-            }
-            catch
-            {
-            }
         }
 
         private static void FormatSingleTable(
@@ -3120,94 +1539,6 @@ namespace DocuLint
             return bestWidth;
         }
 
-        private static List<TableHeaderMemoryItem> CaptureTrailingTableHeaderMemories(Word.Document doc, int position)
-        {
-            List<TableHeaderMemoryItem> memories = new List<TableHeaderMemoryItem>();
-            if (doc == null)
-            {
-                return memories;
-            }
-
-            try
-            {
-                foreach (Word.Table table in doc.Tables)
-                {
-                    if (table?.Range == null || table.Range.Start <= position)
-                    {
-                        continue;
-                    }
-
-                    int headerRowCount = GetEffectiveHeaderRowCount(doc, table);
-                    if (headerRowCount < 1)
-                    {
-                        continue;
-                    }
-
-                    memories.Add(new TableHeaderMemoryItem
-                    {
-                        Table = table,
-                        HeaderRowCount = headerRowCount
-                    });
-                }
-            }
-            catch
-            {
-            }
-
-            return memories;
-        }
-
-        private static void RestoreTrailingTableHeaderMemories(Word.Document doc, List<TableHeaderMemoryItem> memories)
-        {
-            if (doc == null || memories == null || memories.Count == 0)
-            {
-                return;
-            }
-
-            foreach (TableHeaderMemoryItem memory in memories)
-            {
-                if (memory?.Table?.Range == null || memory.HeaderRowCount < 1)
-                {
-                    continue;
-                }
-
-                RememberHeaderRowCount(doc, memory.Table, memory.HeaderRowCount);
-                MarkTopRowsAsHeading(memory.Table, memory.HeaderRowCount);
-            }
-        }
-
-        private static string GetDocumentOverrideKey(Word.Document doc)
-        {
-            if (doc == null)
-            {
-                return string.Empty;
-            }
-
-            try
-            {
-                if (!string.IsNullOrWhiteSpace(doc.FullName))
-                {
-                    return doc.FullName;
-                }
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                if (!string.IsNullOrWhiteSpace(doc.Name))
-                {
-                    return doc.Name;
-                }
-            }
-            catch
-            {
-            }
-
-            return string.Empty;
-        }
-
         private static int ResolveHeaderRowCount(int nativeCount, int logicalCount, int totalRows)
         {
             int safeNative = Math.Max(0, nativeCount);
@@ -3281,89 +1612,7 @@ namespace DocuLint
             }
         }
 
-        private static void DeleteParagraphBetweenTables(Word.Table upperTable, Word.Table lowerTable)
-        {
-            if (upperTable?.Range == null || lowerTable?.Range == null)
-            {
-                return;
-            }
-
-            try
-            {
-                if (lowerTable.Range.Start <= upperTable.Range.End)
-                {
-                    return;
-                }
-
-                // 优先从下表前向前清理换行，避免 Word 表格边界残留空段落。
-                DeleteLineBreaksBeforeRange(lowerTable.Range, 32, upperTable.Range.End);
-                if (lowerTable.Range.Start <= upperTable.Range.End)
-                {
-                    return;
-                }
-
-                Word.Range gapRange = upperTable.Range.Duplicate;
-                gapRange.SetRange(upperTable.Range.End, lowerTable.Range.Start);
-                try
-                {
-                    gapRange.Text = string.Empty;
-                }
-                catch
-                {
-                    gapRange.Delete();
-                }
-                return;
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                Word.Range fallbackRange = upperTable.Range.Duplicate;
-                fallbackRange.SetRange(upperTable.Range.End, lowerTable.Range.Start);
-                fallbackRange.Select();
-                Word.Selection selection = Globals.ThisAddIn?.Application?.Selection;
-                if (selection != null)
-                {
-                    selection.Delete();
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        private static void DeleteParagraphRange(Word.Paragraph paragraph)
-        {
-            if (paragraph?.Range == null)
-            {
-                return;
-            }
-
-            try
-            {
-                Word.Range paragraphRange = paragraph.Range.Duplicate;
-                int documentStart = paragraphRange.Document?.Content?.Start ?? 0;
-
-                // 题注删掉后，顺手清理它前面紧邻的空行，避免上下两个表之间残留空白段落。
-                DeleteLineBreaksBeforeRange(paragraphRange, 8, documentStart);
-
-                try
-                {
-                    paragraphRange.Text = string.Empty;
-                }
-                catch
-                {
-                    paragraphRange.Delete();
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        private static void DeleteOneLineBreakBeforeRange(Word.Range range)
+                        private static void DeleteOneLineBreakBeforeRange(Word.Range range)
         {
             DeleteLineBreaksBeforeRange(range, 1);
         }
@@ -3409,36 +1658,7 @@ namespace DocuLint
             return ch == '\r' || ch == '\n' || ch == '\v' || ch == '\f';
         }
 
-        private static bool TryDeleteRowBlock(Word.Application app, Word.Table table, int startRow, int endRow)
-        {
-            if (app == null || table == null || startRow < 1 || endRow < startRow)
-            {
-                return false;
-            }
-
-            try
-            {
-                int deleteCount = endRow - startRow + 1;
-                bool deletedAny = false;
-                for (int i = 0; i < deleteCount; i++)
-                {
-                    if (!TryDeleteSingleRow(app, table, startRow))
-                    {
-                        return false;
-                    }
-
-                    deletedAny = true;
-                }
-
-                return deletedAny;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static string GetComparableRowText(Word.Table table, int rowIndex)
+                private static string GetComparableRowText(Word.Table table, int rowIndex)
         {
             if (table?.Range?.Cells == null || rowIndex < 1)
             {
@@ -3473,213 +1693,7 @@ namespace DocuLint
             return builder.ToString();
         }
 
-        private static bool ShouldDeleteContinuationHeaderBeforeMerge(
-            Word.Document doc,
-            Word.Table previousTable,
-            Word.Table continuationTable)
-        {
-            if (previousTable?.Range == null || continuationTable?.Range == null)
-            {
-                return false;
-            }
-
-            int headerRowCount = GetMergeContinuationHeaderRowCount(doc, previousTable, continuationTable);
-            if (headerRowCount <= 0)
-            {
-                return false;
-            }
-
-            if (HasManualHeaderOverrideForMerge(doc, previousTable, continuationTable))
-            {
-                return true;
-            }
-
-            if (DoHeaderRowsMatchForMerge(previousTable, continuationTable, headerRowCount))
-            {
-                return true;
-            }
-
-            if (!TryGetContinuationComparisonCell(continuationTable, out int compareColumnIndex, out string continuationCellText))
-            {
-                return false;
-            }
-
-            if (!DoesPreviousTableHeaderMatch(doc, previousTable, continuationTable, compareColumnIndex, continuationCellText))
-            {
-                return false;
-            }
-
-            return headerRowCount > 0;
-        }
-
-        private static bool DoHeaderRowsMatchForMerge(
-            Word.Table previousTable,
-            Word.Table continuationTable,
-            int headerRowCount)
-        {
-            if (previousTable?.Range == null || continuationTable?.Range == null || headerRowCount < 1)
-            {
-                return false;
-            }
-
-            int previousRowCount = GetTableRowCountSafe(previousTable, headerRowCount);
-            int continuationRowCount = GetTableRowCountSafe(continuationTable, headerRowCount);
-            int safeHeaderRowCount = Math.Min(
-                Math.Max(1, headerRowCount),
-                Math.Min(Math.Max(1, previousRowCount), Math.Max(1, continuationRowCount)));
-
-            bool matchedAnyNonEmptyRow = false;
-            for (int rowIndex = 1; rowIndex <= safeHeaderRowCount; rowIndex++)
-            {
-                string previousSignature = GetComparableRowSignature(previousTable, rowIndex);
-                string continuationSignature = GetComparableRowSignature(continuationTable, rowIndex);
-
-                if (string.IsNullOrWhiteSpace(previousSignature) && string.IsNullOrWhiteSpace(continuationSignature))
-                {
-                    continue;
-                }
-
-                matchedAnyNonEmptyRow = true;
-                if (!string.Equals(previousSignature, continuationSignature, StringComparison.Ordinal))
-                {
-                    return false;
-                }
-            }
-
-            return matchedAnyNonEmptyRow;
-        }
-
-        private static bool HasManualHeaderOverrideForMerge(
-            Word.Document doc,
-            Word.Table previousTable,
-            Word.Table continuationTable)
-        {
-            if (doc == null)
-            {
-                return false;
-            }
-
-            if (continuationTable?.Range != null && TryGetManualHeaderOverride(doc, continuationTable, out _))
-            {
-                return true;
-            }
-
-            if (previousTable?.Range != null && TryGetManualHeaderOverride(doc, previousTable, out _))
-            {
-                return true;
-            }
-
-            return false;
-        }
-
-        private static bool DoesPreviousTableHeaderMatch(
-            Word.Document doc,
-            Word.Table previousTable,
-            Word.Table continuationTable,
-            int compareColumnIndex,
-            string continuationCellText)
-        {
-            if (previousTable?.Range == null
-                || continuationTable?.Range == null
-                || compareColumnIndex < 1
-                || string.IsNullOrWhiteSpace(continuationCellText))
-            {
-                return false;
-            }
-
-            string firstRowCellText = GetNormalizedCellText(previousTable, 1, compareColumnIndex);
-            if (string.Equals(continuationCellText, firstRowCellText, StringComparison.Ordinal))
-            {
-                return true;
-            }
-
-            int headerRowCount = GetMergeContinuationHeaderRowCount(doc, previousTable, continuationTable);
-            int safeHeaderRowCount = Math.Min(
-                Math.Max(1, headerRowCount),
-                Math.Max(1, GetTableRowCountSafe(previousTable, headerRowCount)));
-
-            for (int rowIndex = 1; rowIndex <= safeHeaderRowCount; rowIndex++)
-            {
-                string previousCellText = GetNormalizedCellText(previousTable, rowIndex, compareColumnIndex);
-                if (string.Equals(continuationCellText, previousCellText, StringComparison.Ordinal))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static int GetMergeContinuationHeaderRowCount(
-            Word.Document doc,
-            Word.Table previousTable,
-            Word.Table continuationTable)
-        {
-            if (doc != null)
-            {
-                if (continuationTable?.Range != null && TryGetManualHeaderOverride(doc, continuationTable, out int continuationManualHeaderCount))
-                {
-                    return continuationManualHeaderCount;
-                }
-
-                if (previousTable?.Range != null && TryGetManualHeaderOverride(doc, previousTable, out int previousManualHeaderCount))
-                {
-                    return previousManualHeaderCount;
-                }
-            }
-
-            return GetEffectiveHeaderRowCount(doc, continuationTable);
-        }
-
-        private static bool TryGetContinuationComparisonCell(
-            Word.Table table,
-            out int columnIndex,
-            out string cellText)
-        {
-            columnIndex = 0;
-            cellText = string.Empty;
-
-            if (table?.Range == null)
-            {
-                return false;
-            }
-
-            int maxColumnsToInspect = 12;
-            for (int candidateColumnIndex = 1; candidateColumnIndex <= maxColumnsToInspect; candidateColumnIndex++)
-            {
-                string candidateCellText = GetNormalizedCellText(table, 1, candidateColumnIndex);
-                if (string.IsNullOrWhiteSpace(candidateCellText))
-                {
-                    continue;
-                }
-
-                columnIndex = candidateColumnIndex;
-                cellText = candidateCellText;
-                return true;
-            }
-
-            return false;
-        }
-
-        private static string GetNormalizedCellText(Word.Table table, int rowIndex, int columnIndex)
-        {
-            if (table == null || rowIndex < 1 || columnIndex < 1)
-            {
-                return string.Empty;
-            }
-
-            try
-            {
-                Word.Cell cell = table.Cell(rowIndex, columnIndex);
-                return NormalizeParagraphText(cell?.Range?.Text);
-            }
-            catch
-            {
-                return string.Empty;
-            }
-        }
-
-        private static string GetComparableRowSignature(Word.Table table, int rowIndex)
+                                                                private static string GetComparableRowSignature(Word.Table table, int rowIndex)
         {
             string text = GetComparableRowText(table, rowIndex);
             if (string.IsNullOrWhiteSpace(text))
@@ -4120,7 +2134,6 @@ namespace DocuLint
 
         private void button5_Click(object sender, RibbonControlEventArgs e)
         {
-            RememberTableSelectionAction(button5, button5_Click);
             try
             {
                 Word.Application app = Globals.ThisAddIn.Application;
@@ -4193,109 +2206,6 @@ namespace DocuLint
             nextCrossPageTable.Select();
         }
 
-        private void button22_Click(object sender, RibbonControlEventArgs e)
-        {
-            RememberTableSelectionAction(button22, button22_Click);
-            try
-            {
-                Word.Application app = Globals.ThisAddIn.Application;
-                Word.Document doc = app?.ActiveDocument;
-                Word.Selection selection = app?.Selection;
-                Word.Range cursorRange = selection?.Range;
-
-                if (doc == null)
-                {
-                    MessageBox.Show("当前没有活动文档。", "文档不加班");
-                    return;
-                }
-
-                if (cursorRange == null)
-                {
-                    MessageBox.Show("请先把光标放到 Word 文档正文中。", "文档不加班");
-                    return;
-                }
-
-                SelectNextContinuationTableAfterCursor(doc, cursorRange);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"选择下个续表失败: {ex.Message}", "文档不加班");
-            }
-        }
-
-        private static void SelectNextContinuationTableAfterCursor(Word.Document doc, Word.Range cursorRange)
-        {
-            if (doc == null || cursorRange == null)
-            {
-                MessageBox.Show("请先把光标放到 Word 文档正文中。", "文档不加班");
-                return;
-            }
-
-            int cursorPosition = cursorRange.Start;
-            Word.Table continuationTable = FindNextContinuationTable(doc, cursorPosition);
-            if (continuationTable == null)
-            {
-                MessageBox.Show("从当前光标位置开始，未找到下个续表。", "文档不加班");
-                return;
-            }
-
-            continuationTable.Select();
-        }
-
-        private static Word.Table FindNextContinuationTable(Word.Document doc, int cursorPosition)
-        {
-            if (doc == null)
-            {
-                return null;
-            }
-
-            try
-            {
-                foreach (Word.Table table in doc.Tables)
-                {
-                    if (table?.Range == null)
-                    {
-                        continue;
-                    }
-
-                    if (table.Range.Start < cursorPosition)
-                    {
-                        continue;
-                    }
-
-                    string captionText = GetNearestNonEmptyParagraphBeforeTable(doc, table);
-                    if (IsContinuationTableCaption(captionText))
-                    {
-                        return table;
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            return null;
-        }
-
-        private static string GetNearestNonEmptyParagraphBeforeTable(Word.Document doc, Word.Table table)
-        {
-            Word.Paragraph paragraph = GetNearestNonEmptyParagraphBeforeTableParagraph(doc, table);
-            return paragraph == null ? string.Empty : NormalizeParagraphText(paragraph.Range.Text);
-        }
-
-        private static bool IsContinuationTableCaption(string paragraphText)
-        {
-            if (string.IsNullOrWhiteSpace(paragraphText))
-            {
-                return false;
-            }
-
-            return Regex.IsMatch(
-                paragraphText,
-                @"^表\s*[0-9０-９一二三四五六七八九十百千]+(?:\s*[\.．\-—]\s*[0-9０-９一二三四五六七八九十百千]+)*\s*[（(]\s*续\s*[）)]\s*$",
-                RegexOptions.IgnoreCase);
-        }
-
         private static bool IsCrossPageTable(Word.Table table)
         {
             if (table?.Range == null)
@@ -4315,137 +2225,5 @@ namespace DocuLint
             }
         }
 
-        private void button19_Click(object sender, RibbonControlEventArgs e)
-        {
-            RememberTableSelectionAction(button19, button19_Click);
-            try
-            {
-                Word.Application app = Globals.ThisAddIn.Application;
-                Word.Document doc = app?.ActiveDocument;
-                if (doc == null)
-                {
-                    MessageBox.Show("当前没有活动文档。", "文档不加班");
-                    return;
-                }
-
-                SelectAllTablesAfterToc(doc);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"选择全部表格失败: {ex.Message}", "文档不加班");
-            }
-        }
-
-        private static void SelectAllTablesAfterToc(Word.Document doc)
-        {
-            if (doc == null)
-            {
-                return;
-            }
-
-            int scanStart = GetScanStartAfterToc(doc);
-            List<Word.Table> matchedTables = new List<Word.Table>();
-
-            try
-            {
-                foreach (Word.Table table in doc.Tables)
-                {
-                    if (table?.Range == null)
-                    {
-                        continue;
-                    }
-
-                    if (scanStart > 0 && table.Range.End <= scanStart)
-                    {
-                        continue;
-                    }
-
-                    matchedTables.Add(table);
-                }
-            }
-            catch
-            {
-            }
-
-            if (matchedTables.Count == 0)
-            {
-                string message = scanStart > 0
-                    ? "目录后面没有找到可选取的表格。"
-                    : "当前文档中没有找到可选取的表格。";
-                MessageBox.Show(message, "文档不加班");
-                return;
-            }
-
-            SelectEditableTableRanges(doc, matchedTables);
-
-            string successMessage = scanStart > 0
-                ? $"已选中目录后的 {matchedTables.Count} 个表格。"
-                : $"已选中文档中的 {matchedTables.Count} 个表格。";
-            MessageBox.Show(successMessage, "文档不加班");
-        }
-
-        private static void SelectEditableTableRanges(Word.Document doc, IList<Word.Table> tables)
-        {
-            if (doc == null || tables == null || tables.Count == 0)
-            {
-                return;
-            }
-
-            object editor = Word.WdEditorType.wdEditorEveryone;
-
-            DeleteAllEditableRanges(doc, editor);
-            try
-            {
-                foreach (Word.Table table in tables)
-                {
-                    Word.Range range = table?.Range;
-                    if (range == null)
-                    {
-                        continue;
-                    }
-
-                    AddEditableRange(range, editor);
-                }
-
-                SelectAllEditableRanges(doc, editor);
-            }
-            finally
-            {
-                DeleteAllEditableRanges(doc, editor);
-            }
-        }
-
-        private static void AddEditableRange(Word.Range range, object editor)
-        {
-            object[] args = { editor };
-            range.Editors.GetType().InvokeMember(
-                "Add",
-                BindingFlags.InvokeMethod,
-                null,
-                range.Editors,
-                args);
-        }
-
-        private static void SelectAllEditableRanges(Word.Document doc, object editor)
-        {
-            object[] args = { editor };
-            doc.GetType().InvokeMember(
-                "SelectAllEditableRanges",
-                BindingFlags.InvokeMethod,
-                null,
-                doc,
-                args);
-        }
-
-        private static void DeleteAllEditableRanges(Word.Document doc, object editor)
-        {
-            object[] args = { editor };
-            doc.GetType().InvokeMember(
-                "DeleteAllEditableRanges",
-                BindingFlags.InvokeMethod,
-                null,
-                doc,
-                args);
-        }
     }
 }

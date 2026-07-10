@@ -12,10 +12,18 @@ namespace DocuLint
     {
         private const string CaptionReferenceBookmarkPrefix = "DocuLintCaptionRef_";
 
+        internal enum CaptionReferenceKind
+        {
+            Number,
+            FullCaption,
+            PageNumber
+        }
+
         private sealed class CaptionReferenceTarget
         {
             public int Start { get; set; }
             public Word.Paragraph Paragraph { get; set; }
+            public string Text { get; set; }
             public string BookmarkName { get; set; }
         }
 
@@ -27,6 +35,11 @@ namespace DocuLint
         private void button29_Click(object sender, RibbonControlEventArgs e)
         {
             ExecuteInsertNearestCaptionReference(searchForward: true);
+        }
+
+        private void button31_Click(object sender, RibbonControlEventArgs e)
+        {
+            ExecuteInsertSelectedCaptionReference();
         }
 
         private static void ExecuteInsertNearestCaptionReference(bool searchForward)
@@ -67,7 +80,59 @@ namespace DocuLint
                     return;
                 }
 
-                InsertCaptionReferenceField(selection, target.BookmarkName);
+                InsertCaptionReferenceField(selection, target.BookmarkName, CaptionReferenceKind.Number);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"插入题注引用失败: {ex.Message}", "文档不加班");
+            }
+        }
+
+        private static void ExecuteInsertSelectedCaptionReference()
+        {
+            try
+            {
+                Word.Application app = Globals.ThisAddIn.Application;
+                Word.Document doc = app?.ActiveDocument;
+                Word.Selection selection = app?.Selection;
+                if (doc == null)
+                {
+                    MessageBox.Show("当前没有活动文档。", "文档不加班");
+                    return;
+                }
+
+                if (selection?.Range == null)
+                {
+                    MessageBox.Show("请先把光标放到要插入引用的位置。", "文档不加班");
+                    return;
+                }
+
+                List<CaptionReferenceTarget> targets = CollectCaptionReferenceTargets(doc);
+                if (targets.Count == 0)
+                {
+                    MessageBox.Show("当前文档中没有可引用的题注。", "文档不加班");
+                    return;
+                }
+
+                using (CaptionReferencePickerForm form = new CaptionReferencePickerForm(
+                    targets.Select(item => item.Text).ToList(),
+                    CaptionReferenceKind.Number))
+                {
+                    if (form.ShowDialog() != DialogResult.OK)
+                    {
+                        return;
+                    }
+
+                    CaptionReferenceTarget target = targets[form.SelectedIndex];
+                    string bookmarkName = EnsureCaptionReferenceBookmark(doc, target.Paragraph, form.SelectedReferenceKind, null);
+                    if (string.IsNullOrWhiteSpace(bookmarkName))
+                    {
+                        MessageBox.Show("无法为所选题注创建引用。", "文档不加班");
+                        return;
+                    }
+
+                    InsertCaptionReferenceField(selection, bookmarkName, form.SelectedReferenceKind);
+                }
             }
             catch (Exception ex)
             {
@@ -85,13 +150,14 @@ namespace DocuLint
 
             foreach (CaptionListEntry entry in CollectCaptionListEntries(doc))
             {
+                ThrowIfOperationCancelled();
                 Word.Paragraph paragraph = GetParagraphAtStart(doc, entry?.Start ?? 0);
                 if (paragraph?.Range == null)
                 {
                     continue;
                 }
 
-                string bookmarkName = EnsureCaptionReferenceBookmark(doc, paragraph, null);
+                string bookmarkName = EnsureCaptionReferenceBookmark(doc, paragraph, CaptionReferenceKind.Number, null);
                 if (string.IsNullOrWhiteSpace(bookmarkName))
                 {
                     continue;
@@ -101,6 +167,7 @@ namespace DocuLint
                 {
                     Start = paragraph.Range.Start,
                     Paragraph = paragraph,
+                    Text = entry.Text,
                     BookmarkName = bookmarkName
                 });
             }
@@ -136,7 +203,10 @@ namespace DocuLint
             }
         }
 
-        private static void InsertCaptionReferenceField(Word.Selection selection, string bookmarkName)
+        private static void InsertCaptionReferenceField(
+            Word.Selection selection,
+            string bookmarkName,
+            CaptionReferenceKind referenceKind)
         {
             if (selection?.Range == null || string.IsNullOrWhiteSpace(bookmarkName))
             {
@@ -151,7 +221,9 @@ namespace DocuLint
                 field = insertRange.Fields.Add(
                     insertRange,
                     Word.WdFieldType.wdFieldEmpty,
-                    $" REF {bookmarkName} \\h ",
+                    referenceKind == CaptionReferenceKind.PageNumber
+                        ? $" PAGEREF {bookmarkName} \\h "
+                        : $" REF {bookmarkName} \\h ",
                     false);
             }
             catch
@@ -258,30 +330,35 @@ namespace DocuLint
             }
         }
 
-        private static string EnsureCaptionReferenceBookmark(Word.Document doc, Word.Paragraph paragraph, string preferredName)
+        private static string EnsureCaptionReferenceBookmark(
+            Word.Document doc,
+            Word.Paragraph paragraph,
+            CaptionReferenceKind referenceKind,
+            string preferredName)
         {
             if (doc == null || paragraph?.Range == null)
             {
                 return null;
             }
 
-            Word.Range prefixRange = GetCaptionReferencePrefixRange(paragraph);
-            if (prefixRange == null)
+            Word.Range bookmarkRange = GetCaptionReferenceRange(paragraph, referenceKind);
+            if (bookmarkRange == null)
             {
                 return null;
             }
 
-            List<string> existingNames = GetCaptionReferenceBookmarkNames(doc, paragraph);
+            List<string> existingNames = GetCaptionReferenceBookmarkNames(doc, paragraph, referenceKind);
             string bookmarkName = !string.IsNullOrWhiteSpace(preferredName)
                 ? preferredName
                 : existingNames.FirstOrDefault();
             if (string.IsNullOrWhiteSpace(bookmarkName))
             {
-                bookmarkName = GenerateCaptionReferenceBookmarkName(doc);
+                bookmarkName = GenerateCaptionReferenceBookmarkName(doc, referenceKind);
             }
 
             foreach (string existingName in existingNames)
             {
+                ThrowIfOperationCancelled();
                 if (!string.Equals(existingName, bookmarkName, StringComparison.OrdinalIgnoreCase))
                 {
                     TryDeleteBookmark(doc, existingName);
@@ -291,7 +368,7 @@ namespace DocuLint
             TryDeleteBookmark(doc, bookmarkName);
             try
             {
-                doc.Bookmarks.Add(bookmarkName, prefixRange);
+                doc.Bookmarks.Add(bookmarkName, bookmarkRange);
                 return bookmarkName;
             }
             catch
@@ -302,10 +379,13 @@ namespace DocuLint
 
         private static string FindCaptionReferenceBookmarkName(Word.Document doc, Word.Paragraph paragraph)
         {
-            return GetCaptionReferenceBookmarkNames(doc, paragraph).FirstOrDefault();
+            return GetCaptionReferenceBookmarkNames(doc, paragraph, CaptionReferenceKind.Number).FirstOrDefault();
         }
 
-        private static List<string> GetCaptionReferenceBookmarkNames(Word.Document doc, Word.Paragraph paragraph)
+        private static List<string> GetCaptionReferenceBookmarkNames(
+            Word.Document doc,
+            Word.Paragraph paragraph,
+            CaptionReferenceKind referenceKind)
         {
             List<string> names = new List<string>();
             if (doc == null || paragraph?.Range == null)
@@ -323,8 +403,9 @@ namespace DocuLint
 
                 foreach (Word.Bookmark bookmark in bookmarks)
                 {
+                    ThrowIfOperationCancelled();
                     string name = bookmark?.Name ?? string.Empty;
-                    if (!name.StartsWith(CaptionReferenceBookmarkPrefix, StringComparison.OrdinalIgnoreCase))
+                    if (!IsCaptionReferenceBookmarkForKind(name, referenceKind))
                     {
                         continue;
                     }
@@ -339,6 +420,41 @@ namespace DocuLint
             return names
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
+        }
+
+        private static Word.Range GetCaptionReferenceRange(Word.Paragraph paragraph, CaptionReferenceKind referenceKind)
+        {
+            switch (referenceKind)
+            {
+                case CaptionReferenceKind.FullCaption:
+                case CaptionReferenceKind.PageNumber:
+                    return GetCaptionReferenceFullRange(paragraph);
+                default:
+                    return GetCaptionReferencePrefixRange(paragraph);
+            }
+        }
+
+        private static Word.Range GetCaptionReferenceFullRange(Word.Paragraph paragraph)
+        {
+            if (paragraph?.Range == null)
+            {
+                return null;
+            }
+
+            Word.Range range = paragraph.Range.Duplicate;
+            while (range.End > range.Start)
+            {
+                ThrowIfOperationCancelled();
+                string tail = range.Text?.Substring(Math.Max(0, range.Text.Length - 1)) ?? string.Empty;
+                if (tail != "\r" && tail != "\a")
+                {
+                    break;
+                }
+
+                range.End -= 1;
+            }
+
+            return range.End > range.Start ? range : null;
         }
 
         private static Word.Range GetCaptionReferencePrefixRange(Word.Paragraph paragraph)
@@ -376,11 +492,13 @@ namespace DocuLint
             return range;
         }
 
-        private static string GenerateCaptionReferenceBookmarkName(Word.Document doc)
+        private static string GenerateCaptionReferenceBookmarkName(Word.Document doc, CaptionReferenceKind referenceKind)
         {
+            string prefix = GetCaptionReferenceBookmarkPrefix(referenceKind);
             for (int i = 0; i < 200; i++)
             {
-                string candidate = CaptionReferenceBookmarkPrefix + Guid.NewGuid().ToString("N");
+                ThrowIfOperationCancelled();
+                string candidate = prefix + Guid.NewGuid().ToString("N");
                 try
                 {
                     if (doc?.Bookmarks == null || !doc.Bookmarks.Exists(candidate))
@@ -394,7 +512,41 @@ namespace DocuLint
                 }
             }
 
-            return CaptionReferenceBookmarkPrefix + DateTime.UtcNow.Ticks.ToString();
+            return prefix + DateTime.UtcNow.Ticks.ToString();
+        }
+
+        private static string GetCaptionReferenceBookmarkPrefix(CaptionReferenceKind referenceKind)
+        {
+            switch (referenceKind)
+            {
+                case CaptionReferenceKind.FullCaption:
+                    return CaptionReferenceBookmarkPrefix + "Full_";
+                case CaptionReferenceKind.PageNumber:
+                    return CaptionReferenceBookmarkPrefix + "Page_";
+                default:
+                    return CaptionReferenceBookmarkPrefix + "Number_";
+            }
+        }
+
+        private static bool IsCaptionReferenceBookmarkForKind(string bookmarkName, CaptionReferenceKind referenceKind)
+        {
+            if (string.IsNullOrWhiteSpace(bookmarkName))
+            {
+                return false;
+            }
+
+            if (referenceKind != CaptionReferenceKind.Number)
+            {
+                return bookmarkName.StartsWith(GetCaptionReferenceBookmarkPrefix(referenceKind), StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (!bookmarkName.StartsWith(CaptionReferenceBookmarkPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return !bookmarkName.StartsWith(GetCaptionReferenceBookmarkPrefix(CaptionReferenceKind.FullCaption), StringComparison.OrdinalIgnoreCase)
+                && !bookmarkName.StartsWith(GetCaptionReferenceBookmarkPrefix(CaptionReferenceKind.PageNumber), StringComparison.OrdinalIgnoreCase);
         }
 
         private static void TryDeleteBookmark(Word.Document doc, string bookmarkName)
@@ -427,6 +579,7 @@ namespace DocuLint
 
             foreach (Word.Range storyRange in EnumerateStoryRanges(doc))
             {
+                ThrowIfOperationCancelled();
                 UpdateCaptionReferenceFieldsInRange(storyRange);
             }
         }
@@ -442,6 +595,7 @@ namespace DocuLint
             {
                 foreach (Word.Field field in storyRange.Fields)
                 {
+                    ThrowIfOperationCancelled();
                     if (field == null)
                     {
                         continue;

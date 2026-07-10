@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Windows.Forms;
 using Microsoft.Office.Tools.Ribbon;
 using Word = Microsoft.Office.Interop.Word;
@@ -66,7 +67,6 @@ namespace DocuLint
 
         private void btnInsertTotalPages_Click(object sender, RibbonControlEventArgs e)
         {
-            RememberInsertItemAction(btnInsertTotalPages, btnInsertTotalPages_Click);
             try
             {
                 ExecuteDocumentCommand("插入总页码", InsertTotalPagesField);
@@ -131,6 +131,103 @@ namespace DocuLint
             }
         }
 
+        private void button32_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                int updatedCount = ExecuteDocumentCommand("图片单倍行距", ApplySingleLineSpacingToPictures);
+                MessageBox.Show(
+                    updatedCount > 0
+                        ? $"已将 {updatedCount} 个图片段落设置为单倍行距。"
+                        : "当前文档中没有找到可处理的图片。",
+                    "文档不加班 快速工具");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"图片单倍行距失败: {ex.Message}", "文档不加班 快速工具");
+            }
+        }
+
+        private void btnApplyHeitiXiaosi_Click(object sender, RibbonControlEventArgs e)
+        {
+            ApplyQuickFont("黑体", 12f, "黑体小四");
+        }
+
+        private void btnApplySongtiXiaosi_Click(object sender, RibbonControlEventArgs e)
+        {
+            ApplyQuickFont("宋体", 12f, "宋体小四");
+        }
+
+        private void btnClearFormatting_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                int updatedCount = ExecuteDocumentCommand("一键清除格式", ClearSelectionToNormalText);
+                MessageBox.Show(
+                    updatedCount > 0
+                        ? "格式清除成功"
+                        : "格式清除失败：当前没有可处理的段落。",
+                    "文档不加班 快速工具");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"格式清除失败: {ex.Message}", "文档不加班 快速工具");
+            }
+        }
+
+        private static void ApplyQuickFont(string fontName, float fontSize, string displayName)
+        {
+            try
+            {
+                ExecuteDocumentCommand(displayName, () => ApplyFontToSelection(fontName, fontSize));
+                TryUpdateStatusBar(Globals.ThisAddIn.Application, $"已设置为{displayName}");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"{displayName}设置失败: {ex.Message}", "文档不加班 快速工具");
+            }
+        }
+
+        private static void ApplyFontToSelection(string fontName, float fontSize)
+        {
+            Word.Application app = Globals.ThisAddIn.Application;
+            Word.Selection selection = app?.Selection;
+            if (selection?.Range == null)
+            {
+                throw new InvalidOperationException("当前没有可设置的选区或输入点。");
+            }
+
+            Word.Font font = selection.Range.Font;
+            font.NameFarEast = fontName;
+            font.Name = fontName;
+            font.Size = fontSize;
+
+            // 光标未选中文本时，同时设置 Selection.Font，保证后续输入也使用该字体。
+            if (selection.Range.Start == selection.Range.End)
+            {
+                selection.Font.NameFarEast = fontName;
+                selection.Font.Name = fontName;
+                selection.Font.Size = fontSize;
+            }
+        }
+
+        private void btnCleanBlankPages_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                int deletedCount = ExecuteDocumentCommand("清理空白页", CleanBlankPages);
+                MessageBox.Show(
+                    deletedCount > 0
+                        ? $"已清理 {deletedCount} 个空白页。"
+                        : "未发现可清理的空白页。",
+                    "文档不加班 快速工具");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"清理空白页失败: {ex.Message}", "文档不加班 快速工具");
+            }
+        }
+
         private void button23_Click(object sender, RibbonControlEventArgs e)
         {
             try
@@ -153,6 +250,7 @@ namespace DocuLint
                 throw new ArgumentNullException(nameof(action));
             }
 
+            ResetOperationCancellation();
             Word.Application app = Globals.ThisAddIn.Application;
             using (new DocumentUndoScope(app, actionName))
             {
@@ -167,6 +265,7 @@ namespace DocuLint
                 throw new ArgumentNullException(nameof(action));
             }
 
+            ResetOperationCancellation();
             Word.Application app = Globals.ThisAddIn.Application;
             using (new DocumentUndoScope(app, actionName))
             {
@@ -257,6 +356,7 @@ namespace DocuLint
             int updatedCount = 0;
             foreach (Word.Range storyRange in EnumerateStoryRanges(doc))
             {
+                ThrowIfOperationCancelled();
                 updatedCount += UpdateTotalPagesFieldsInRange(storyRange);
             }
 
@@ -297,6 +397,7 @@ namespace DocuLint
                     {
                         foreach (Word.TableOfContents toc in doc.TablesOfContents)
                         {
+                            ThrowIfOperationCancelled();
                             if (toc == null)
                             {
                                 continue;
@@ -319,6 +420,8 @@ namespace DocuLint
                 {
                 }
 
+                ApplyTableOfContentsFont(doc);
+
                 try
                 {
                     app.ScreenRefresh();
@@ -331,6 +434,453 @@ namespace DocuLint
             }
 
             return refreshedCount;
+        }
+
+        private static void ApplyTableOfContentsFont(Word.Document doc)
+        {
+            if (doc?.TablesOfContents == null)
+            {
+                return;
+            }
+
+            try
+            {
+                foreach (Word.TableOfContents toc in doc.TablesOfContents)
+                {
+                    ThrowIfOperationCancelled();
+                    try
+                    {
+                        Word.Range range = toc?.Range;
+                        if (range == null)
+                        {
+                            continue;
+                        }
+
+                        range.Font.NameFarEast = "宋体";
+                        range.Font.Name = "宋体";
+                        range.Font.Size = 12f;
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static int ApplySingleLineSpacingToPictures()
+        {
+            Word.Application app = Globals.ThisAddIn.Application;
+            Word.Document doc = app?.ActiveDocument;
+            if (doc == null)
+            {
+                throw new InvalidOperationException("当前没有活动文档。");
+            }
+
+            int updatedCount = 0;
+            HashSet<int> paragraphStarts = new HashSet<int>();
+            using (new WordPerformanceScope(app))
+            {
+                try
+                {
+                    foreach (Word.InlineShape inlineShape in doc.InlineShapes)
+                    {
+                        ThrowIfOperationCancelled();
+                        if (!IsPictureInlineShape(inlineShape))
+                        {
+                            continue;
+                        }
+
+                        if (ApplySingleLineSpacing(inlineShape.Range, paragraphStarts))
+                        {
+                            updatedCount++;
+                        }
+                    }
+                }
+                catch
+                {
+                }
+
+                try
+                {
+                    foreach (Word.Shape shape in doc.Shapes)
+                    {
+                        ThrowIfOperationCancelled();
+                        if (!IsPictureShape(shape))
+                        {
+                            continue;
+                        }
+
+                        if (ApplySingleLineSpacing(shape.Anchor, paragraphStarts))
+                        {
+                            updatedCount++;
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return updatedCount;
+        }
+
+        private static int ClearSelectionToNormalText()
+        {
+            Word.Application app = Globals.ThisAddIn.Application;
+            Word.Selection selection = app?.Selection;
+            if (selection?.Range == null)
+            {
+                throw new InvalidOperationException("当前没有可处理的选区。");
+            }
+
+            int updatedCount = 0;
+            HashSet<int> starts = new HashSet<int>();
+            Word.Paragraphs paragraphs = selection.Range.Paragraphs;
+            if (paragraphs == null || paragraphs.Count == 0)
+            {
+                return 0;
+            }
+
+            using (new WordPerformanceScope(app))
+            {
+                foreach (Word.Paragraph paragraph in paragraphs)
+                {
+                    ThrowIfOperationCancelled();
+                    try
+                    {
+                        Word.Range range = paragraph.Range;
+                        if (range == null || !starts.Add(range.Start))
+                        {
+                            continue;
+                        }
+
+                        object normalStyle = Word.WdBuiltinStyle.wdStyleNormal;
+                        range.set_Style(ref normalStyle);
+                        range.ListFormat.RemoveNumbers();
+                        paragraph.OutlineLevel = Word.WdOutlineLevel.wdOutlineLevelBodyText;
+                        range.ParagraphFormat.OutlineLevel = Word.WdOutlineLevel.wdOutlineLevelBodyText;
+                        updatedCount++;
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            return updatedCount;
+        }
+
+        internal static List<NavigationPaneEntry> CollectBrokenReferenceEntries(Word.Document doc)
+        {
+            List<NavigationPaneEntry> entries = new List<NavigationPaneEntry>();
+            HashSet<int> seenStarts = new HashSet<int>();
+            string[] brokenTexts =
+            {
+                "错误！未找到引用源",
+                "错误!未找到引用源",
+                "未找到引用源",
+                "Error! Reference source not found."
+            };
+
+            foreach (Word.Range storyRange in EnumerateStoryRanges(doc))
+            {
+                ThrowIfOperationCancelled();
+                AddBrokenReferenceFieldEntries(storyRange, brokenTexts, entries, seenStarts);
+                AddBrokenReferenceEntries(storyRange, brokenTexts, entries, seenStarts);
+            }
+
+            return entries.OrderBy(item => item.Start).ToList();
+        }
+
+        private static void AddBrokenReferenceFieldEntries(
+            Word.Range storyRange,
+            string[] brokenTexts,
+            List<NavigationPaneEntry> entries,
+            ISet<int> seenStarts)
+        {
+            if (storyRange?.Fields == null || brokenTexts == null)
+            {
+                return;
+            }
+
+            try
+            {
+                foreach (Word.Field field in storyRange.Fields)
+                {
+                    ThrowIfOperationCancelled();
+                    try
+                    {
+                        Word.Range result = field?.Result;
+                        string text = result?.Text ?? string.Empty;
+                        if (string.IsNullOrWhiteSpace(text)
+                            || !brokenTexts.Any(item => text.IndexOf(item, StringComparison.OrdinalIgnoreCase) >= 0))
+                        {
+                            continue;
+                        }
+
+                        int start = result.Start;
+                        if (seenStarts.Add(start))
+                        {
+                            entries.Add(new NavigationPaneEntry
+                            {
+                                Start = start,
+                                Text = "未更新域：" + BuildBrokenReferenceSnippet(text, 0)
+                            });
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static void AddBrokenReferenceEntries(
+            Word.Range storyRange,
+            string[] brokenTexts,
+            List<NavigationPaneEntry> entries,
+            ISet<int> seenStarts)
+        {
+            if (storyRange == null || brokenTexts == null || brokenTexts.Length == 0)
+            {
+                return;
+            }
+
+            string storyText;
+            try
+            {
+                storyText = storyRange.Text ?? string.Empty;
+            }
+            catch
+            {
+                return;
+            }
+
+            foreach (string brokenText in brokenTexts)
+            {
+                ThrowIfOperationCancelled();
+                int offset = 0;
+                while (offset < storyText.Length)
+                {
+                    ThrowIfOperationCancelled();
+                    int index = storyText.IndexOf(brokenText, offset, StringComparison.OrdinalIgnoreCase);
+                    if (index < 0)
+                    {
+                        break;
+                    }
+
+                    int start = storyRange.Start + index;
+                    if (seenStarts.Add(start))
+                    {
+                        entries.Add(new NavigationPaneEntry
+                        {
+                            Start = start,
+                            Text = "未更新域：" + BuildBrokenReferenceSnippet(storyText, index)
+                        });
+                    }
+
+                    offset = index + Math.Max(1, brokenText.Length);
+                }
+            }
+        }
+
+        private static string BuildBrokenReferenceSnippet(string storyText, int index)
+        {
+            try
+            {
+                int start = Math.Max(0, storyText.LastIndexOf('\r', Math.Max(0, index - 1)) + 1);
+                int end = storyText.IndexOf('\r', index);
+                if (end < 0)
+                {
+                    end = storyText.Length;
+                }
+
+                string text = storyText.Substring(start, Math.Max(0, end - start))
+                    .Replace("\a", string.Empty)
+                    .Trim();
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    text = storyText.Replace("\r", string.Empty).Replace("\a", string.Empty).Trim();
+                }
+
+                return text.Length > 60 ? text.Substring(0, 57) + "..." : text;
+            }
+            catch
+            {
+                return "错误！未找到引用源";
+            }
+        }
+
+        private static int CleanBlankPages()
+        {
+            Word.Application app = Globals.ThisAddIn.Application;
+            Word.Document doc = app?.ActiveDocument;
+            if (doc == null)
+            {
+                throw new InvalidOperationException("当前没有活动文档。");
+            }
+
+            int deletedCount = 0;
+            using (new WordPerformanceScope(app))
+            {
+                int pageCount = 0;
+                try
+                {
+                    doc.Repaginate();
+                    pageCount = doc.ComputeStatistics(Word.WdStatistic.wdStatisticPages, false);
+                }
+                catch
+                {
+                    pageCount = 0;
+                }
+
+                for (int page = pageCount; page >= 1; page--)
+                {
+                    ThrowIfOperationCancelled();
+                    Word.Range pageRange = TryGetPageRange(doc, page, pageCount);
+                    if (pageRange == null || !IsBlankPageRange(doc, pageRange))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        pageRange.Delete();
+                        deletedCount++;
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            return deletedCount;
+        }
+
+        private static Word.Range TryGetPageRange(Word.Document doc, int page, int pageCount)
+        {
+            try
+            {
+                object what = Word.WdGoToItem.wdGoToPage;
+                object which = Word.WdGoToDirection.wdGoToAbsolute;
+                object count = page;
+                Word.Range startRange = doc.GoTo(ref what, ref which, ref count);
+                if (startRange == null)
+                {
+                    return null;
+                }
+
+                int end = doc.Content.End;
+                if (page < pageCount)
+                {
+                    count = page + 1;
+                    Word.Range nextRange = doc.GoTo(ref what, ref which, ref count);
+                    if (nextRange != null)
+                    {
+                        end = nextRange.Start;
+                    }
+                }
+
+                return end > startRange.Start
+                    ? doc.Range(startRange.Start, end)
+                    : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static bool IsBlankPageRange(Word.Document doc, Word.Range range)
+        {
+            try
+            {
+                if (range == null || range.Start <= doc.Content.Start && range.End >= doc.Content.End)
+                {
+                    return false;
+                }
+
+                if ((range.Tables?.Count ?? 0) > 0 || (range.InlineShapes?.Count ?? 0) > 0)
+                {
+                    return false;
+                }
+
+                if (ContainsAnchoredShape(doc, range))
+                {
+                    return false;
+                }
+
+                string text = (range.Text ?? string.Empty)
+                    .Replace("\r", string.Empty)
+                    .Replace("\a", string.Empty)
+                    .Replace("\f", string.Empty)
+                    .Replace("\v", string.Empty)
+                    .Replace("\t", string.Empty)
+                    .Replace(" ", string.Empty)
+                    .Replace("\u3000", string.Empty)
+                    .Replace("\u00A0", string.Empty);
+
+                return text.Length == 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool ContainsAnchoredShape(Word.Document doc, Word.Range range)
+        {
+            try
+            {
+                foreach (Word.Shape shape in doc.Shapes)
+                {
+                    int start = shape?.Anchor?.Start ?? -1;
+                    if (start >= range.Start && start < range.End)
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private static bool ApplySingleLineSpacing(Word.Range range, ISet<int> paragraphStarts)
+        {
+            if (range?.Paragraphs == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                Word.Paragraph paragraph = range.Paragraphs.Count > 0 ? range.Paragraphs[1] : null;
+                if (paragraph?.Range == null)
+                {
+                    return false;
+                }
+
+                if (paragraphStarts != null && !paragraphStarts.Add(paragraph.Range.Start))
+                {
+                    return false;
+                }
+
+                paragraph.Range.ParagraphFormat.LineSpacingRule = Word.WdLineSpacing.wdLineSpaceSingle;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static void PreparePaginationForTotalPages(Word.Application app, Word.Document doc)
@@ -374,29 +924,38 @@ namespace DocuLint
                 yield break;
             }
 
-            Word.Range storyRange = null;
-            try
+            Word.WdStoryType[] storyTypes =
             {
-                storyRange = doc.StoryRanges?[Word.WdStoryType.wdMainTextStory];
-            }
-            catch
-            {
-            }
+                Word.WdStoryType.wdMainTextStory,
+                Word.WdStoryType.wdTextFrameStory
+            };
 
-            while (storyRange != null)
+            foreach (Word.WdStoryType storyType in storyTypes)
             {
-                yield return storyRange;
-
-                Word.Range nextRange = null;
+                Word.Range storyRange = null;
                 try
                 {
-                    nextRange = storyRange.NextStoryRange;
+                    storyRange = doc.StoryRanges?[storyType];
                 }
                 catch
                 {
                 }
 
-                storyRange = nextRange;
+                while (storyRange != null)
+                {
+                    yield return storyRange;
+
+                    Word.Range nextRange = null;
+                    try
+                    {
+                        nextRange = storyRange.NextStoryRange;
+                    }
+                    catch
+                    {
+                    }
+
+                    storyRange = nextRange;
+                }
             }
         }
 
@@ -412,6 +971,7 @@ namespace DocuLint
             {
                 foreach (Word.Field field in range.Fields)
                 {
+                    ThrowIfOperationCancelled();
                     if (field == null)
                     {
                         continue;

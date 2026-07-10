@@ -39,8 +39,8 @@
     <PublishUrl>E:\my_VSTO\搞快点发布\</PublishUrl>
     <InstallUrl />
     <TargetCulture>zh-chs</TargetCulture>
-    <ApplicationVersion>1.0.0.5</ApplicationVersion>
-    <AutoIncrementApplicationRevision>true</AutoIncrementApplicationRevision>
+    <ApplicationVersion>0.0.1.0</ApplicationVersion>
+    <AutoIncrementApplicationRevision>false</AutoIncrementApplicationRevision>
     <UpdateEnabled>false</UpdateEnabled>
     <UpdateInterval>0</UpdateInterval>
     <UpdateIntervalUnits>days</UpdateIntervalUnits>
@@ -237,6 +237,9 @@
     <Content Include="resource\text-check-calibration.default.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="Help\插件帮助文档.html">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>
       <LastGenOutput>Settings.Designer.cs</LastGenOutput>
@@ -264,6 +267,7 @@
     </Compile>
     <Compile Include="Ribbon\Ribbon1.Designer.cs">
       <DependentUpon>Ribbon1.cs</DependentUpon>
+      <SubType>Code</SubType>
     </Compile>
     <!-- Feature modules -->
     <Compile Include="Features\BatchReplace\BatchReplaceDialog.cs">
@@ -272,38 +276,8 @@
     <Compile Include="Features\BatchReplace\BatchReplaceRibbonActions.cs">
       <SubType>Component</SubType>
     </Compile>
-    <Compile Include="Features\DocumentGroups\DocumentGroupManagerForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="Features\DocumentGroups\DocumentGroupModels.cs">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="Features\DocumentGroups\DocumentGroupPickerForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="Features\DocumentGroups\DocumentGroupRibbonActions.cs">
-      <SubType>Component</SubType>
-    </Compile>
     <Compile Include="Features\QuickTools\AutoNumberRibbonActions.cs">
       <SubType>Component</SubType>
-    </Compile>
-    <Compile Include="Features\DocumentGroups\DocumentGroupStore.cs">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="Features\DocumentGroups\CapturedContentPreviewRenderer.cs">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="Features\DocumentGroups\GroupCapturedContentService.cs">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="Features\DocumentGroups\GroupCapturedContentManagerForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="Features\DocumentGroups\GroupCapturedContentInjectForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="Features\DocumentGroups\TextPromptForm.cs">
-      <SubType>Form</SubType>
     </Compile>
     <Compile Include="Features\DocumentInfo\DocumentBasicInfoForm.cs">
       <SubType>Form</SubType>
@@ -317,10 +291,25 @@
     <Compile Include="Features\DocumentInfo\DocumentBasicInfoStore.cs">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="Features\DocumentCheck\DocumentCheckRibbonActions.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Features\DocumentCheck\DocumentCheckResultPaneControl.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
+    <Compile Include="Features\Help\HelpRibbonActions.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="Features\RequirementTracking\RequirementTrackingConsoleControl.cs">
       <SubType>UserControl</SubType>
     </Compile>
+    <Compile Include="Features\RequirementTracking\RequirementExtractionPaneControl.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
     <Compile Include="Features\RequirementTracking\RequirementTrackingModels.cs">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Features\RequirementTracking\RequirementTraceTableExporter.cs">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="Features\RequirementTracking\RequirementTrackingWordService.cs">
@@ -328,6 +317,9 @@
     </Compile>
     <Compile Include="Features\Captions\CaptionListPaneControl.cs">
       <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Features\Captions\CaptionReferencePickerForm.cs">
+      <SubType>Form</SubType>
     </Compile>
     <Compile Include="Features\Navigation\DocumentMarkerService.cs">
       <SubType>Code</SubType>
@@ -353,8 +345,14 @@
     <Compile Include="Features\Outline\OutlineProgressForm.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="Features\Styles\CommonStyleSettingsForm.cs">
+    <Compile Include="Features\Styles\StyleLinkSettingsForm.cs">
       <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Features\Styles\CustomStyleLibraryForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Features\Styles\StyleDefinitionRequest.cs">
+      <SubType>Code</SubType>
     </Compile>
     <Compile Include="Features\Outline\OutlineRibbonActions.cs">
       <SubType>Component</SubType>
@@ -365,22 +363,10 @@
     <Compile Include="Features\TablesAndFigures\TablesAndFiguresRibbonActions.cs">
       <SubType>Component</SubType>
     </Compile>
-    <Compile Include="Features\TablesAndFigures\ImageFormattingProgressForm.cs">
-      <SubType>Form</SubType>
+    <Compile Include="Features\TablesAndFigures\TableFormattingOptions.cs">
+      <SubType>Code</SubType>
     </Compile>
     <Compile Include="Features\TablesAndFigures\TablesAndFiguresFormattingSettingsForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="Features\TablesAndFigures\ImageFormattingSettingsForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="Features\TablesAndFigures\TableFormattingProgressForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="Features\TablesAndFigures\TableFormattingSettingsForm.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="Features\TablesAndFigures\TableSplitProgressForm.cs">
       <SubType>Form</SubType>
     </Compile>
     <AppDesigner Include="Properties\" />

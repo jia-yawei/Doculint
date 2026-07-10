@@ -9,7 +9,8 @@ namespace DocuLint
     internal enum NavigationPaneTab
     {
         Bookmarks,
-        Captions,
+        FigureCaptions,
+        TableCaptions,
         Markers
     }
 
@@ -21,15 +22,20 @@ namespace DocuLint
 
     internal sealed class NavigationPaneControl : UserControl
     {
+        private static readonly Font NavigationPaneFont = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
+
         private readonly TabControl tabControl;
         private readonly Label lblBookmarkHeader;
-        private readonly Label lblCaptionHeader;
+        private readonly Label lblFigureCaptionHeader;
+        private readonly Label lblTableCaptionHeader;
         private readonly Label lblMarkerHeader;
         private readonly ListBox lstBookmarks;
-        private readonly ListBox lstCaptions;
+        private readonly ListBox lstFigureCaptions;
+        private readonly ListBox lstTableCaptions;
         private readonly ListBox lstMarkers;
         private readonly List<NavigationPaneEntry> bookmarkEntries = new List<NavigationPaneEntry>();
-        private readonly List<NavigationPaneEntry> captionEntries = new List<NavigationPaneEntry>();
+        private readonly List<NavigationPaneEntry> figureCaptionEntries = new List<NavigationPaneEntry>();
+        private readonly List<NavigationPaneEntry> tableCaptionEntries = new List<NavigationPaneEntry>();
         private readonly List<NavigationPaneEntry> markerEntries = new List<NavigationPaneEntry>();
 
         internal event Action<int> BookmarkActivated;
@@ -43,19 +49,23 @@ namespace DocuLint
 
             tabControl = new TabControl
             {
-                Dock = DockStyle.Fill
+                Dock = DockStyle.Fill,
+                Font = NavigationPaneFont
             };
             tabControl.SelectedIndexChanged += (_, __) => RaiseSelectedTabChanged();
 
             lblBookmarkHeader = CreateHeaderLabel("书签");
-            lblCaptionHeader = CreateHeaderLabel("题注");
+            lblFigureCaptionHeader = CreateHeaderLabel("图注");
+            lblTableCaptionHeader = CreateHeaderLabel("表注");
             lblMarkerHeader = CreateHeaderLabel("标识");
             lstBookmarks = CreateListBox();
-            lstCaptions = CreateListBox();
+            lstFigureCaptions = CreateListBox();
+            lstTableCaptions = CreateListBox();
             lstMarkers = CreateListBox();
 
             lstBookmarks.DoubleClick += (_, __) => ActivateBookmark();
-            lstCaptions.DoubleClick += (_, __) => ActivateCaption();
+            lstFigureCaptions.DoubleClick += (_, __) => ActivateFigureCaption();
+            lstTableCaptions.DoubleClick += (_, __) => ActivateTableCaption();
             lstMarkers.DoubleClick += (_, __) => ActivateMarker();
             lstBookmarks.KeyDown += (sender, e) =>
             {
@@ -66,13 +76,22 @@ namespace DocuLint
                     ActivateBookmark();
                 }
             };
-            lstCaptions.KeyDown += (sender, e) =>
+            lstFigureCaptions.KeyDown += (sender, e) =>
             {
                 if (e.KeyCode == Keys.Enter)
                 {
                     e.Handled = true;
                     e.SuppressKeyPress = true;
-                    ActivateCaption();
+                    ActivateFigureCaption();
+                }
+            };
+            lstTableCaptions.KeyDown += (sender, e) =>
+            {
+                if (e.KeyCode == Keys.Enter)
+                {
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                    ActivateTableCaption();
                 }
             };
             lstMarkers.KeyDown += (sender, e) =>
@@ -86,7 +105,8 @@ namespace DocuLint
             };
 
             tabControl.TabPages.Add(CreatePage("书签", lblBookmarkHeader, lstBookmarks));
-            tabControl.TabPages.Add(CreatePage("题注", lblCaptionHeader, lstCaptions));
+            tabControl.TabPages.Add(CreatePage("图注", lblFigureCaptionHeader, lstFigureCaptions));
+            tabControl.TabPages.Add(CreatePage("表注", lblTableCaptionHeader, lstTableCaptions));
             tabControl.TabPages.Add(CreateMarkerPage());
             Controls.Add(tabControl);
         }
@@ -96,9 +116,14 @@ namespace DocuLint
             SetEntries(bookmarkEntries, lstBookmarks, lblBookmarkHeader, entries, docName, "书签");
         }
 
-        internal void SetCaptionEntries(IList<NavigationPaneEntry> entries, string docName)
+        internal void SetFigureCaptionEntries(IList<NavigationPaneEntry> entries, string docName)
         {
-            SetEntries(captionEntries, lstCaptions, lblCaptionHeader, entries, docName, "题注");
+            SetEntries(figureCaptionEntries, lstFigureCaptions, lblFigureCaptionHeader, entries, docName, "图注");
+        }
+
+        internal void SetTableCaptionEntries(IList<NavigationPaneEntry> entries, string docName)
+        {
+            SetEntries(tableCaptionEntries, lstTableCaptions, lblTableCaptionHeader, entries, docName, "表注");
         }
 
         internal void SetMarkerEntries(IList<NavigationPaneEntry> entries, string docName, string docTypeName)
@@ -113,11 +138,14 @@ namespace DocuLint
                 case NavigationPaneTab.Bookmarks:
                     tabControl.SelectedIndex = 0;
                     break;
-                case NavigationPaneTab.Captions:
+                case NavigationPaneTab.FigureCaptions:
                     tabControl.SelectedIndex = 1;
                     break;
-                case NavigationPaneTab.Markers:
+                case NavigationPaneTab.TableCaptions:
                     tabControl.SelectedIndex = 2;
+                    break;
+                case NavigationPaneTab.Markers:
+                    tabControl.SelectedIndex = 3;
                     break;
             }
         }
@@ -129,7 +157,9 @@ namespace DocuLint
                 case 0:
                     return NavigationPaneTab.Bookmarks;
                 case 1:
-                    return NavigationPaneTab.Captions;
+                    return NavigationPaneTab.FigureCaptions;
+                case 2:
+                    return NavigationPaneTab.TableCaptions;
                 default:
                     return NavigationPaneTab.Markers;
             }
@@ -146,15 +176,26 @@ namespace DocuLint
             BookmarkActivated?.Invoke(bookmarkEntries[index].Start);
         }
 
-        private void ActivateCaption()
+        private void ActivateFigureCaption()
         {
-            int index = lstCaptions.SelectedIndex;
-            if (index < 0 || index >= captionEntries.Count)
+            int index = lstFigureCaptions.SelectedIndex;
+            if (index < 0 || index >= figureCaptionEntries.Count)
             {
                 return;
             }
 
-            CaptionActivated?.Invoke(captionEntries[index].Start);
+            CaptionActivated?.Invoke(figureCaptionEntries[index].Start);
+        }
+
+        private void ActivateTableCaption()
+        {
+            int index = lstTableCaptions.SelectedIndex;
+            if (index < 0 || index >= tableCaptionEntries.Count)
+            {
+                return;
+            }
+
+            CaptionActivated?.Invoke(tableCaptionEntries[index].Start);
         }
 
         private void ActivateMarker()
@@ -245,6 +286,7 @@ namespace DocuLint
             {
                 Dock = DockStyle.Fill,
                 Text = text,
+                Font = NavigationPaneFont,
                 ForeColor = Color.FromArgb(80, 80, 80),
                 TextAlign = ContentAlignment.MiddleLeft
             };
@@ -255,8 +297,13 @@ namespace DocuLint
             return new ListBox
             {
                 Dock = DockStyle.Fill,
+                Font = NavigationPaneFont,
                 HorizontalScrollbar = true,
-                IntegralHeight = false
+                IntegralHeight = false,
+                ItemHeight = Math.Max(18, (int)Math.Ceiling(NavigationPaneFont.GetHeight() + 4f)),
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.White,
+                ForeColor = Color.FromArgb(30, 30, 30)
             };
         }
     }

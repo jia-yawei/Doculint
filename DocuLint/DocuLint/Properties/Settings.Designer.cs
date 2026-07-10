@@ -23,16 +23,5 @@ namespace DocuLint.Properties {
             }
         }
 
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("Horizontal")]
-        public string QuickToolsAutoNumberDirection {
-            get {
-                return ((string)(this["QuickToolsAutoNumberDirection"]));
-            }
-            set {
-                this["QuickToolsAutoNumberDirection"] = value;
-            }
-        }
     }
 }

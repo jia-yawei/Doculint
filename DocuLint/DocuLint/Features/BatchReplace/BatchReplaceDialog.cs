@@ -64,42 +64,58 @@ namespace DocuLint
             MaximizeBox = false;
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = new Font("Microsoft YaHei UI", 10.5F, FontStyle.Regular, GraphicsUnit.Point);
+            BackColor = Color.FromArgb(246, 248, 252);
 
-            TabControl tabs = new TabControl { Dock = DockStyle.Fill };
-            TabPage pageConfig = new TabPage("查找和替换");
+            TabControl tabs = new TabControl
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Point(16, 6)
+            };
+            TabPage pageConfig = new TabPage("查找和替换")
+            {
+                BackColor = Color.FromArgb(246, 248, 252),
+                Padding = new Padding(8)
+            };
             tabs.TabPages.Add(pageConfig);
             Controls.Add(tabs);
 
             SplitContainer split = new SplitContainer
             {
                 Dock = DockStyle.Fill,
-                Orientation = Orientation.Vertical
+                Orientation = Orientation.Vertical,
+                BackColor = Color.FromArgb(218, 226, 238),
+                SplitterWidth = 8
             };
             pageConfig.Controls.Add(split);
-            Shown += (s, e) => BeginInvoke((Action)(() => ApplySafeSplitLayout(split, 860, 700, 450)));
-            SizeChanged += (s, e) => ApplySafeSplitLayout(split, 860, 700, 450);
+            Shown += (s, e) => BeginInvoke((Action)(() => ApplySafeSplitLayout(split, 500, 450, 700)));
+            SizeChanged += (s, e) => ApplySafeSplitLayout(split, 500, 450, 700);
 
             TableLayoutPanel leftLayout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 2
+                RowCount = 2,
+                BackColor = Color.White,
+                Padding = new Padding(12)
             };
             leftLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
             leftLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            split.Panel1.Controls.Add(leftLayout);
+            split.Panel2.Controls.Add(leftLayout);
 
             FlowLayoutPanel toolbar = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 AutoSize = false,
                 WrapContents = false,
-                Padding = new Padding(6, 10, 6, 6)
+                Padding = new Padding(0, 8, 0, 6),
+                BackColor = Color.White
             };
             leftLayout.Controls.Add(toolbar, 0, 0);
 
             Button btnAddRule = new Button { Text = "添加行", Width = 110, Height = 34 };
             Button btnDeleteRule = new Button { Text = "删除行", Width = 110, Height = 34 };
+            ApplySecondaryButtonStyle(btnAddRule);
+            ApplySecondaryButtonStyle(btnDeleteRule);
             toolbar.Controls.Add(btnAddRule);
             toolbar.Controls.Add(btnDeleteRule);
 
@@ -114,8 +130,15 @@ namespace DocuLint
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
                 AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None,
                 ColumnHeadersHeight = 38,
-                RowTemplate = { Height = 34 }
+                RowTemplate = { Height = 36 },
+                BackgroundColor = Color.White,
+                BorderStyle = BorderStyle.None,
+                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
+                ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None,
+                EnableHeadersVisualStyles = false,
+                GridColor = Color.FromArgb(229, 234, 242)
             };
+            ApplyGridStyle(dgvRules);
             leftLayout.Controls.Add(dgvRules, 0, 1);
 
             DataGridViewTextBoxColumn colRowNo = new DataGridViewTextBoxColumn
@@ -154,45 +177,46 @@ namespace DocuLint
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
                 RowCount = 4,
-                Padding = new Padding(8)
+                Padding = new Padding(12),
+                BackColor = Color.White
             };
             rightLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
             rightLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
             rightLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             rightLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
-            split.Panel2.Controls.Add(rightLayout);
+            split.Panel1.Controls.Add(rightLayout);
 
             TableLayoutPanel patternLayout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 5
+                ColumnCount = 4
             };
-            patternLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 96));
-            patternLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             patternLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112));
+            patternLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             patternLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112));
             patternLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112));
             rightLayout.Controls.Add(patternLayout, 0, 0);
 
-            Label lblPattern = new Label { Text = "文件来源:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+            Label lblPattern = new Label { Text = "文件来源:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font(Font, FontStyle.Bold) };
             patternLayout.Controls.Add(lblPattern, 0, 0);
 
             Label lblSourceHint = new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "可一键选活动组，或浏览文件夹/多文件",
+                Text = "可浏览文件夹或选择多个文件",
                 TextAlign = ContentAlignment.MiddleLeft,
                 Margin = new Padding(3, 10, 3, 8)
             };
             patternLayout.Controls.Add(lblSourceHint, 1, 0);
 
-            Button btnAddActiveGroup = new Button { Text = "活动组", Dock = DockStyle.Fill, Margin = new Padding(3, 8, 3, 8) };
             Button btnAddFiles = new Button { Text = "多文件", Dock = DockStyle.Fill, Margin = new Padding(3, 8, 3, 8) };
             Button btnAddFolder = new Button { Text = "文件夹", Dock = DockStyle.Fill, Margin = new Padding(3, 8, 3, 8) };
             Button btnRemoveNode = new Button { Text = "移除", Width = 88, Height = 30, Margin = new Padding(0, 4, 0, 4) };
-            patternLayout.Controls.Add(btnAddActiveGroup, 2, 0);
-            patternLayout.Controls.Add(btnAddFiles, 3, 0);
-            patternLayout.Controls.Add(btnAddFolder, 4, 0);
+            ApplySecondaryButtonStyle(btnAddFiles);
+            ApplySecondaryButtonStyle(btnAddFolder);
+            ApplySecondaryButtonStyle(btnRemoveNode);
+            patternLayout.Controls.Add(btnAddFiles, 2, 0);
+            patternLayout.Controls.Add(btnAddFolder, 3, 0);
 
             TableLayoutPanel fileHeaderLayout = new TableLayoutPanel
             {
@@ -208,7 +232,8 @@ namespace DocuLint
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleLeft,
                 AutoSize = true,
-                Margin = new Padding(3, 8, 3, 3)
+                Margin = new Padding(3, 8, 3, 3),
+                Font = new Font(Font, FontStyle.Bold)
             };
             fileHeaderLayout.Controls.Add(lblTargetFiles, 0, 0);
             fileHeaderLayout.Controls.Add(btnRemoveNode, 1, 0);
@@ -217,7 +242,11 @@ namespace DocuLint
             tvFiles = new TreeView
             {
                 CheckBoxes = true,
-                Dock = DockStyle.Fill
+                Dock = DockStyle.Fill,
+                BorderStyle = BorderStyle.None,
+                BackColor = Color.White,
+                Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Regular, GraphicsUnit.Point),
+                ItemHeight = 26
             };
             rightLayout.Controls.Add(tvFiles, 0, 2);
 
@@ -230,12 +259,12 @@ namespace DocuLint
             };
             rightLayout.Controls.Add(actionLayout, 0, 3);
 
-            Button btnReplace = new Button { Text = "开始替换", Width = 92, Height = 34 };
+            Button btnReplace = new Button { Text = "开始替换", Width = 112, Height = 36 };
+            ApplyPrimaryButtonStyle(btnReplace);
             actionLayout.Controls.Add(btnReplace);
 
             btnAddRule.Click += (s, e) => AddDefaultRule();
             btnDeleteRule.Click += (s, e) => DeleteSelectedRules();
-            btnAddActiveGroup.Click += (s, e) => AddActiveGroupFiles();
             btnAddFiles.Click += (s, e) => AddFileNodes();
             btnAddFolder.Click += (s, e) => AddFolderNode();
             btnRemoveNode.Click += (s, e) => RemoveSelectedNode();
@@ -408,44 +437,6 @@ namespace DocuLint
             }
         }
 
-        private void AddActiveGroupFiles()
-        {
-            DocumentGroupStore store = new DocumentGroupStore();
-            DocumentGroupCatalog catalog = store.Load();
-            DocumentGroupItem activeGroup = store.EnsureActiveGroup(catalog, TryGetCurrentDocumentPathOrEmpty());
-            if (activeGroup == null)
-            {
-                MessageBox.Show("当前没有活动文档组。", "批量查找与替换");
-                return;
-            }
-
-            int addedCount = 0;
-            foreach (DocumentGroupDocumentItem item in activeGroup.Documents ?? new List<DocumentGroupDocumentItem>())
-            {
-                if (item == null || string.IsNullOrWhiteSpace(item.FilePath))
-                {
-                    continue;
-                }
-
-                if (!IsWordDocumentPath(item.FilePath))
-                {
-                    continue;
-                }
-
-                int before = CountAllFileNodes();
-                AddFilePathNode(item.FilePath);
-                if (CountAllFileNodes() > before)
-                {
-                    addedCount++;
-                }
-            }
-
-            if (addedCount == 0)
-            {
-                MessageBox.Show("活动组中没有可用的 Word 文件。", "批量查找与替换");
-            }
-        }
-
         private void AddFilePathNode(string filePath)
         {
             if (!File.Exists(filePath))
@@ -579,24 +570,6 @@ namespace DocuLint
                    string.Equals(extension, ".dotm", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static string TryGetCurrentDocumentPathOrEmpty()
-        {
-            try
-            {
-                var app = Globals.ThisAddIn?.Application;
-                if (app?.ActiveDocument == null)
-                {
-                    return string.Empty;
-                }
-
-                return app.ActiveDocument.FullName ?? string.Empty;
-            }
-            catch
-            {
-                return string.Empty;
-            }
-        }
-
         private List<BatchReplaceRule> BuildRules()
         {
             List<BatchReplaceRule> rules = new List<BatchReplaceRule>();
@@ -638,6 +611,72 @@ namespace DocuLint
             }
 
             return rules;
+        }
+
+        private static void ApplyGridStyle(DataGridView grid)
+        {
+            if (grid == null)
+            {
+                return;
+            }
+
+            grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(245, 247, 250);
+            grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(43, 57, 76);
+            grid.ColumnHeadersDefaultCellStyle.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold, GraphicsUnit.Point);
+            grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            grid.DefaultCellStyle.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Regular, GraphicsUnit.Point);
+            grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(225, 239, 255);
+            grid.DefaultCellStyle.SelectionForeColor = Color.Black;
+            grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(250, 252, 255);
+            EnableDoubleBuffering(grid);
+        }
+
+        private static void ApplyPrimaryButtonStyle(Button button)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            button.UseVisualStyleBackColor = false;
+            button.BackColor = Color.FromArgb(42, 122, 226);
+            button.ForeColor = Color.White;
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderSize = 0;
+            button.FlatAppearance.MouseOverBackColor = Color.FromArgb(58, 136, 236);
+            button.FlatAppearance.MouseDownBackColor = Color.FromArgb(33, 105, 199);
+            button.Cursor = Cursors.Hand;
+        }
+
+        private static void ApplySecondaryButtonStyle(Button button)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            button.UseVisualStyleBackColor = false;
+            button.BackColor = Color.FromArgb(235, 243, 255);
+            button.ForeColor = Color.FromArgb(36, 89, 171);
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderColor = Color.FromArgb(176, 203, 240);
+            button.FlatAppearance.BorderSize = 1;
+            button.FlatAppearance.MouseOverBackColor = Color.FromArgb(223, 236, 255);
+            button.FlatAppearance.MouseDownBackColor = Color.FromArgb(209, 227, 253);
+            button.Cursor = Cursors.Hand;
+        }
+
+        private static void EnableDoubleBuffering(DataGridView grid)
+        {
+            try
+            {
+                typeof(DataGridView)
+                    .GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                    ?.SetValue(grid, true, null);
+            }
+            catch
+            {
+            }
         }
     }
 }

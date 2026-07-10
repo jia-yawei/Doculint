@@ -203,6 +203,18 @@ namespace DocuLint
             MessageBox.Show(summary, "文档不加班 批量替换");
         }
 
+        private void btnStyleBrush_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                Globals.ThisAddIn?.Application?.CommandBars?.ExecuteMso("FormatPainter");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"启动格式刷失败: {ex.Message}", "文档不加班");
+            }
+        }
+
         private int ReplaceInDocument(Word.Document doc, BatchReplaceExecutionRequest request)
         {
             int totalCount = 0;

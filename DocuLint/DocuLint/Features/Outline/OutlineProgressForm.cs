@@ -9,7 +9,6 @@ namespace DocuLint
     {
         private readonly Label titleLabel;
         private readonly Label messageLabel;
-        private readonly Label percentLabel;
         private readonly Label detailLabel;
         private readonly ProgressBar progressBar;
         private readonly Stopwatch uiRefreshWatch = Stopwatch.StartNew();
@@ -24,77 +23,59 @@ namespace DocuLint
             MaximizeBox = false;
             MinimizeBox = false;
             ControlBox = false;
-            BackColor = Color.White;
-            ClientSize = new Size(520, 260);
+            BackColor = SystemColors.Window;
+            ClientSize = new Size(460, 170);
 
-            Panel cardPanel = new Panel
+            TableLayoutPanel layout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                BackColor = Color.White,
-                Padding = new Padding(26, 22, 26, 22)
+                ColumnCount = 1,
+                RowCount = 4,
+                Padding = new Padding(22, 16, 22, 16),
+                BackColor = SystemColors.Window
             };
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
             titleLabel = new Label
             {
-                Dock = DockStyle.Top,
-                Height = 40,
+                Dock = DockStyle.Fill,
                 Font = new Font(Font, FontStyle.Bold),
-                ForeColor = Color.Black,
-                Text = "正在重建自动章节号"
+                ForeColor = SystemColors.ControlText,
+                Text = "正在更新章节号",
+                TextAlign = ContentAlignment.MiddleLeft
             };
 
             messageLabel = new Label
             {
-                Dock = DockStyle.Top,
-                Height = 46,
-                Margin = new Padding(0, 6, 0, 0),
-                ForeColor = Color.Black,
-                Text = "正在准备..."
-            };
-
-            Panel progressHost = new Panel
-            {
-                Dock = DockStyle.Bottom,
-                Height = 46,
-                Padding = new Padding(0, 12, 0, 0)
+                Dock = DockStyle.Fill,
+                ForeColor = SystemColors.ControlText,
+                Text = "正在准备...",
+                TextAlign = ContentAlignment.MiddleLeft
             };
 
             progressBar = new ProgressBar
             {
-                Location = new Point(0, 13),
-                Size = new Size(320, 16),
-                Style = ProgressBarStyle.Continuous,
+                Dock = DockStyle.Fill,
+                Style = ProgressBarStyle.Blocks,
                 Maximum = 100
-            };
-
-            percentLabel = new Label
-            {
-                Location = new Point(336, 7),
-                Size = new Size(130, 28),
-                TextAlign = ContentAlignment.MiddleRight,
-                Font = new Font(Font, FontStyle.Bold),
-                ForeColor = Color.Black,
-                Text = "进度：0%"
             };
 
             detailLabel = new Label
             {
-                Dock = DockStyle.Top,
-                Height = 66,
-                Margin = new Padding(0, 10, 0, 0),
-                ForeColor = Color.Black,
-                Text = "扫描文档结构后会开始处理标题编号。"
+                Dock = DockStyle.Fill,
+                ForeColor = SystemColors.GrayText,
+                Text = "请稍候，Word 正在处理文档结构。",
+                TextAlign = ContentAlignment.MiddleLeft
             };
 
-            progressHost.Controls.Add(progressBar);
-            progressHost.Controls.Add(percentLabel);
-
-            cardPanel.Controls.Add(progressHost);
-            cardPanel.Controls.Add(detailLabel);
-            cardPanel.Controls.Add(messageLabel);
-            cardPanel.Controls.Add(titleLabel);
-
-            Controls.Add(cardPanel);
+            layout.Controls.Add(titleLabel, 0, 0);
+            layout.Controls.Add(messageLabel, 0, 1);
+            layout.Controls.Add(progressBar, 0, 2);
+            layout.Controls.Add(detailLabel, 0, 3);
+            Controls.Add(layout);
         }
 
         public void ReportProgress(int current, int total, string message)
@@ -107,11 +88,10 @@ namespace DocuLint
 
             int percent = total <= 0 ? 0 : Math.Max(0, Math.Min(100, (int)Math.Round(current * 100d / total)));
             messageLabel.Text = string.IsNullOrWhiteSpace(message) ? "正在处理..." : message;
-            percentLabel.Text = "进度：" + percent + "%";
             progressBar.Value = percent;
             detailLabel.Text = total <= 0
                 ? "正在整理文档中的标题段落..."
-                : $"已处理 {Math.Max(0, Math.Min(current, total))} / {total} 个步骤";
+                : $"已处理 {Math.Max(0, Math.Min(current, total))} / {total}";
 
             uiRefreshWatch.Restart();
             Refresh();

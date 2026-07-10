@@ -3,9 +3,5 @@
   <Profiles>
     <Profile Name="(Default)" />
   </Profiles>
-  <Settings>
-    <Setting Name="QuickToolsAutoNumberDirection" Type="System.String" Scope="User">
-      <Value Profile="(Default)">Horizontal</Value>
-    </Setting>
-  </Settings>
+  <Settings />
 </SettingsFile>

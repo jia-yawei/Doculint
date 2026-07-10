@@ -3,51 +3,65 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
-using System.Text.RegularExpressions;
+using System.Text;
 using System.Windows.Forms;
+using System.Xml.Linq;
 using Word = Microsoft.Office.Interop.Word;
+using Office = Microsoft.Office.Core;
 
 namespace DocuLint
 {
     internal sealed class RequirementTrackingConsoleControl : UserControl
     {
-        private const string SearchPlaceholderText = "模糊搜索名称/ID";
+        private const string SavedTraceMappingsNamespace = "urn:doculint:requirement-tracking";
+
+        private enum FilterMode
+        {
+            All,
+            Mapped,
+            Unmapped
+        }
 
         private readonly Func<Word.Application> applicationAccessor;
-        private readonly ComboBox cmbSourceDoc;
-        private readonly ComboBox cmbTargetDoc;
-        private readonly Button btnBrowseSourceDoc;
-        private readonly Button btnBrowseTargetDoc;
-        private readonly Button btnLoadSourceData;
-        private readonly Button btnLoadTargetData;
-        private readonly ListBox lstSourceReqs;
-        private readonly CheckedListBox chkListTargetReqs;
-        private readonly TextBox txtSearchTarget;
-        private readonly Label lblSourceHeader;
-        private readonly Label lblTargetHeader;
-        private readonly Label lblProgress;
+        private readonly Button btnImportTarget;
+        private readonly Button btnExportTable;
+        private readonly ComboBox cmbTraceTemplate;
+        private readonly Label lblTraceTemplate;
+        private readonly Button btnPreviousSource;
+        private readonly Button btnNextSource;
+        private readonly Button btnNextUnmappedSource;
+        private readonly ComboBox cmbSourceViewMode;
+        private readonly ComboBox cmbSourceFilter;
+        private readonly ComboBox cmbTargetFilter;
+        private readonly TextBox txtTargetSearch;
+        private readonly DataGridView gridSource;
+        private readonly DataGridView gridTargetRecommended;
+        private readonly DataGridView gridTargetAll;
+        private readonly Label lblSourceTitle;
+        private readonly Label lblTargetTitle;
+        private readonly Label lblViewMode;
+        private readonly Label lblPreviousSource;
+        private readonly Label lblCurrentSource;
+        private readonly Label lblNextSource;
+        private readonly Label lblRecommendedTitle;
+        private readonly Label lblAllTargetTitle;
+        private readonly Panel sourceContentPanel;
+        private readonly Panel targetContentPanel;
+        private readonly Panel recommendedTargetPanel;
+        private readonly Panel allTargetPanel;
+        private readonly TableLayoutPanel compactSourcePanel;
 
         private readonly Dictionary<string, RequirementTraceMapping> mappingsBySourceId =
             new Dictionary<string, RequirementTraceMapping>(StringComparer.OrdinalIgnoreCase);
-
-        private readonly List<RequirementTrackingDocumentOption> openDocumentOptions =
-            new List<RequirementTrackingDocumentOption>();
-
-        private readonly List<string> manuallySelectedDocumentPaths =
-            new List<string>();
-
-        private readonly HashSet<string> selectedTargetRequirementIds =
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        private readonly List<RequirementItem> visibleTargetRequirements =
-            new List<RequirementItem>();
+        private readonly List<RequirementItem> currentSourceViewItems = new List<RequirementItem>();
 
         private RequirementTrackingDocumentSnapshot sourceSnapshot;
         private RequirementTrackingDocumentSnapshot targetSnapshot;
-        private bool suppressSourceSelection;
-        private bool suppressTargetChecks;
-        private bool suppressSearchRefresh;
+        private string sourceDocumentFullName;
+        private RequirementItem selectedSource;
+        private string selectedTargetId;
+        private bool suppressSourceChanged;
+        private bool suppressTargetChanged;
 
         internal RequirementTrackingConsoleControl(Func<Word.Application> applicationAccessor)
         {
@@ -58,1066 +72,1018 @@ namespace DocuLint
             Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
             AutoScaleMode = AutoScaleMode.Dpi;
 
-            TableLayoutPanel rootLayout = new TableLayoutPanel
+            TableLayoutPanel root = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
                 RowCount = 3,
-                Padding = new Padding(10)
+                Padding = new Padding(6)
             };
-            rootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 190f));
-            rootLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-            rootLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34f));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 36f));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
-            GroupBox topGroup = new GroupBox
+            FlowLayoutPanel header = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                Text = "需求追踪控制台",
-                Font = new Font("Microsoft YaHei UI", 10.5F, FontStyle.Bold, GraphicsUnit.Point),
-                Padding = new Padding(10, 14, 10, 12)
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                Margin = new Padding(0, 0, 0, 4)
             };
+            btnImportTarget = CreatePrimaryButton("导入互追文档");
+            btnImportTarget.Dock = DockStyle.None;
+            btnImportTarget.Width = 168;
+            btnImportTarget.Click += (_, __) => ImportTargetDocument();
+            btnExportTable = CreatePrimaryButton("导出追踪表");
+            btnExportTable.Dock = DockStyle.None;
+            btnExportTable.Width = 120;
+            btnExportTable.Click += (_, __) => ExportTraceTable();
+            header.Controls.Add(btnImportTarget);
+            header.Controls.Add(btnExportTable);
+            lblTraceTemplate = CreateToolbarLabel("追踪模板");
+            lblTraceTemplate.Margin = new Padding(0, 4, 4, 0);
+            cmbTraceTemplate = CreateComboBox("SRS->SDS", "SDS->SRS", "SDS->SDD", "SDD->SDS");
+            cmbTraceTemplate.Width = 140;
+            cmbTraceTemplate.SelectedIndexChanged += (_, __) => OnTraceTemplateChanged();
+            lblViewMode = CreateToolbarLabel("视图");
+            lblViewMode.Margin = new Padding(8, 4, 4, 0);
+            cmbSourceViewMode = CreateComboBox("精简", "详细");
+            cmbSourceViewMode.Width = 116;
+            cmbSourceViewMode.SelectedIndexChanged += (_, __) => RefreshViewPreservingSelection();
 
-            TableLayoutPanel topLayout = new TableLayoutPanel
+            FlowLayoutPanel secondHeader = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 3,
-                RowCount = 3
+                AutoSize = true,
+                WrapContents = false
             };
-            topLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150f));
-            topLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            topLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 72f));
-            topLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
-            topLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
-            topLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
+            secondHeader.Controls.Add(lblTraceTemplate);
+            secondHeader.Controls.Add(cmbTraceTemplate);
+            secondHeader.Controls.Add(lblViewMode);
+            secondHeader.Controls.Add(cmbSourceViewMode);
 
-            Label lblSourceDoc = CreateFieldLabel("基准文档");
-            Label lblTargetDoc = CreateFieldLabel("目标文档");
-
-            cmbSourceDoc = CreateDocumentComboBox();
-            cmbTargetDoc = CreateDocumentComboBox();
-            btnBrowseSourceDoc = CreateBrowseButton();
-            btnBrowseSourceDoc.Click += BtnBrowseSourceDoc_Click;
-            btnBrowseTargetDoc = CreateBrowseButton();
-            btnBrowseTargetDoc.Click += BtnBrowseTargetDoc_Click;
-
-            btnLoadSourceData = CreateLoadButton("加载并解析基准文档需求");
-            btnLoadSourceData.Dock = DockStyle.None;
-            btnLoadSourceData.Width = 256;
-            btnLoadSourceData.Anchor = AnchorStyles.None;
-            btnLoadSourceData.Click += BtnLoadSourceData_Click;
-            btnLoadTargetData = CreateLoadButton("加载并解析目标文档需求");
-            btnLoadTargetData.Dock = DockStyle.None;
-            btnLoadTargetData.Width = 256;
-            btnLoadTargetData.Anchor = AnchorStyles.None;
-            btnLoadTargetData.Click += BtnLoadTargetData_Click;
-
-            TableLayoutPanel loadButtonLayout = new TableLayoutPanel
+            TableLayoutPanel split = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
                 RowCount = 1,
                 Margin = new Padding(0)
             };
-            loadButtonLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
-            loadButtonLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
-            loadButtonLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-            loadButtonLayout.Controls.Add(btnLoadSourceData, 0, 0);
-            loadButtonLayout.Controls.Add(btnLoadTargetData, 1, 0);
+            split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+            split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
 
-            topLayout.Controls.Add(lblSourceDoc, 0, 0);
-            topLayout.Controls.Add(cmbSourceDoc, 1, 0);
-            topLayout.Controls.Add(btnBrowseSourceDoc, 2, 0);
-            topLayout.Controls.Add(lblTargetDoc, 0, 1);
-            topLayout.Controls.Add(cmbTargetDoc, 1, 1);
-            topLayout.Controls.Add(btnBrowseTargetDoc, 2, 1);
-            topLayout.Controls.Add(loadButtonLayout, 0, 2);
-            topLayout.SetColumnSpan(loadButtonLayout, 3);
-            topGroup.Controls.Add(topLayout);
+            lblSourceTitle = CreatePaneTitle("当前文档需求");
+            lblTargetTitle = CreatePaneTitle("互追文档需求");
+            lblPreviousSource = CreateSourceCardLabel();
+            lblCurrentSource = CreateSourceCardLabel(true);
+            lblNextSource = CreateSourceCardLabel();
+            lblPreviousSource.Click += (_, __) => SelectAdjacentSource(-1);
+            lblNextSource.Click += (_, __) => SelectAdjacentSource(1);
 
-            TableLayoutPanel middleLayout = new TableLayoutPanel
+            cmbSourceFilter = CreateComboBox("全部", "已追踪", "未追踪");
+            cmbTargetFilter = CreateComboBox("全部", "已追踪", "未追踪");
+            cmbSourceFilter.SelectedIndexChanged += (_, __) => RefreshViewPreservingSelection();
+            cmbTargetFilter.SelectedIndexChanged += (_, __) => RenderTargets();
+
+            btnPreviousSource = CreateSmallButton("上一条");
+            btnNextSource = CreateSmallButton("下一条");
+            btnNextUnmappedSource = CreateSmallButton("下一条未追踪");
+            btnPreviousSource.Click += (_, __) => SelectAdjacentSource(-1);
+            btnNextSource.Click += (_, __) => SelectAdjacentSource(1);
+            btnNextUnmappedSource.Click += (_, __) => SelectNextUnmappedSource();
+
+            txtTargetSearch = new TextBox
             {
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 2,
-                Padding = new Padding(0, 6, 0, 6)
+                Width = 220,
+                Margin = new Padding(6, 4, 0, 0)
             };
-            middleLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
-            middleLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            txtTargetSearch.TextChanged += (_, __) => RenderTargets();
 
-            Label lblMappingTitle = new Label
-            {
-                Dock = DockStyle.Fill,
-                Font = new Font("Microsoft YaHei UI", 10.5F, FontStyle.Bold, GraphicsUnit.Point),
-                Text = "需求映射与关系建立",
-                TextAlign = ContentAlignment.MiddleLeft
-            };
+            gridSource = CreateRequirementGrid(false);
+            gridSource.SelectionChanged += GridSource_SelectionChanged;
+            gridTargetRecommended = CreateRequirementGrid(true);
+            gridTargetAll = CreateRequirementGrid(true);
+            WireTargetGrid(gridTargetRecommended);
+            WireTargetGrid(gridTargetAll);
 
-            Button btnReverseTrace = CreateLoadButton("反向追踪");
-            btnReverseTrace.Dock = DockStyle.None;
-            btnReverseTrace.Width = 186;
-            btnReverseTrace.Anchor = AnchorStyles.None;
-            btnReverseTrace.Margin = new Padding(0);
-            btnReverseTrace.Click += BtnReverseTrace_Click;
+            lblRecommendedTitle = CreatePaneTitle("候选推荐（最多 20 条）");
+            lblAllTargetTitle = CreatePaneTitle("全部目标需求");
+            compactSourcePanel = CreateCompactSourcePanel();
+            sourceContentPanel = new Panel { Dock = DockStyle.Fill };
+            sourceContentPanel.Controls.Add(gridSource);
+            sourceContentPanel.Controls.Add(compactSourcePanel);
+            recommendedTargetPanel = CreateTargetSectionPanel(lblRecommendedTitle, gridTargetRecommended);
+            allTargetPanel = CreateTargetSectionPanel(lblAllTargetTitle, gridTargetAll);
+            targetContentPanel = new Panel { Dock = DockStyle.Fill };
+            targetContentPanel.Controls.Add(recommendedTargetPanel);
+            targetContentPanel.Controls.Add(allTargetPanel);
 
-            TableLayoutPanel mappingHeaderLayout = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 2
-            };
-            mappingHeaderLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            mappingHeaderLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 202f));
-            mappingHeaderLayout.Controls.Add(lblMappingTitle, 0, 0);
-            mappingHeaderLayout.Controls.Add(btnReverseTrace, 1, 0);
+            split.Controls.Add(CreateSourcePane(), 0, 0);
+            split.Controls.Add(CreateTargetPane(), 1, 0);
 
-            TableLayoutPanel splitContainer = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 2,
-                RowCount = 1
-            };
-            splitContainer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
-            splitContainer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
-            splitContainer.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-
-            TableLayoutPanel leftPaneLayout = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 2,
-                Padding = new Padding(0)
-            };
-            leftPaneLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28f));
-            leftPaneLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-
-            lblSourceHeader = new Label
-            {
-                Dock = DockStyle.Fill,
-                Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold, GraphicsUnit.Point),
-                Text = "需求列表",
-                TextAlign = ContentAlignment.MiddleLeft
-            };
-
-            lstSourceReqs = new ListBox
-            {
-                Dock = DockStyle.Fill,
-                IntegralHeight = false,
-                HorizontalScrollbar = true
-            };
-            lstSourceReqs.SelectedIndexChanged += LstSourceReqs_SelectedIndexChanged;
-
-            leftPaneLayout.Controls.Add(lblSourceHeader, 0, 0);
-            leftPaneLayout.Controls.Add(lstSourceReqs, 0, 1);
-            Panel leftPanePanel = CreateBorderPanel();
-            leftPanePanel.Controls.Add(leftPaneLayout);
-
-            TableLayoutPanel rightPaneLayout = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 3
-            };
-            rightPaneLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28f));
-            rightPaneLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34f));
-            rightPaneLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-
-            lblTargetHeader = new Label
-            {
-                Dock = DockStyle.Fill,
-                Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold, GraphicsUnit.Point),
-                Text = "目标需求候选（多选）",
-                TextAlign = ContentAlignment.MiddleLeft
-            };
-
-            txtSearchTarget = new TextBox
-            {
-                Dock = DockStyle.Fill,
-                ForeColor = Color.Gray,
-                Text = SearchPlaceholderText
-            };
-            txtSearchTarget.Enter += TxtSearchTarget_Enter;
-            txtSearchTarget.Leave += TxtSearchTarget_Leave;
-            txtSearchTarget.TextChanged += TxtSearchTarget_TextChanged;
-
-            chkListTargetReqs = new CheckedListBox
-            {
-                Dock = DockStyle.Fill,
-                CheckOnClick = true,
-                IntegralHeight = false,
-                HorizontalScrollbar = true
-            };
-            chkListTargetReqs.ItemCheck += ChkListTargetReqs_ItemCheck;
-
-            rightPaneLayout.Controls.Add(lblTargetHeader, 0, 0);
-            rightPaneLayout.Controls.Add(txtSearchTarget, 0, 1);
-            rightPaneLayout.Controls.Add(chkListTargetReqs, 0, 2);
-            Panel rightPanePanel = CreateBorderPanel();
-            rightPanePanel.Controls.Add(rightPaneLayout);
-            splitContainer.Controls.Add(leftPanePanel, 0, 0);
-            splitContainer.Controls.Add(rightPanePanel, 1, 0);
-
-            middleLayout.Controls.Add(mappingHeaderLayout, 0, 0);
-            middleLayout.Controls.Add(splitContainer, 0, 1);
-
-            Panel bottomPanel = new Panel
-            {
-                Dock = DockStyle.Fill
-            };
-
-            lblProgress = new Label
-            {
-                Dock = DockStyle.Fill,
-                ForeColor = Color.FromArgb(70, 70, 70),
-                Text = "追踪进度：0/0",
-                TextAlign = ContentAlignment.MiddleLeft
-            };
-
-            bottomPanel.Controls.Add(lblProgress);
-
-            rootLayout.Controls.Add(topGroup, 0, 0);
-            rootLayout.Controls.Add(middleLayout, 0, 1);
-            rootLayout.Controls.Add(bottomPanel, 0, 2);
-            Controls.Add(rootLayout);
-
-            RefreshDocumentOptions();
+            root.Controls.Add(header, 0, 0);
+            root.Controls.Add(secondHeader, 0, 1);
+            root.Controls.Add(split, 0, 2);
+            Controls.Add(root);
         }
 
-        internal void RefreshDocumentOptions()
+        internal void LoadCurrentDocumentAsSource()
         {
-            string previousSourceFullName = GetSelectedDocumentFullName(cmbSourceDoc);
-            string previousTargetFullName = GetSelectedDocumentFullName(cmbTargetDoc);
+            Word.Document document = GetApplication()?.ActiveDocument;
+            if (document == null)
+            {
+                lblSourceTitle.Text = "当前没有活动文档";
+                lblTargetTitle.Text = "互追文档需求";
+                ClearAllGrids();
+                return;
+            }
 
-            openDocumentOptions.Clear();
-            openDocumentOptions.AddRange(BuildDocumentOptions());
-
-            BindDocumentOptions(cmbSourceDoc, previousSourceFullName);
-            BindDocumentOptions(cmbTargetDoc, previousTargetFullName);
-            ApplyPreferredDocumentSelections(previousSourceFullName, previousTargetFullName);
+            sourceSnapshot = BuildSavedSnapshot(document);
+            sourceDocumentFullName = sourceSnapshot.FullName;
+            LoadTraceMappingsFromSourceDocument();
+            selectedSource = sourceSnapshot.Requirements.FirstOrDefault();
+            RenderSources(selectedSource?.Id);
+            RenderTargets();
+            UpdateTitlesAndStatus();
         }
 
-        private void BtnLoadSourceData_Click(object sender, EventArgs e)
+        private void ImportTargetDocument()
         {
-            LoadRequirements(cmbSourceDoc, btnLoadSourceData, "基准文档", true);
+            Word.Document document = GetApplication()?.ActiveDocument;
+            if (document == null)
+            {
+                MessageBox.Show(this, "当前没有可导入的活动文档。", "需求追踪");
+                return;
+            }
+
+            targetSnapshot = BuildSavedSnapshot(document);
+            RenderTargets();
+            UpdateTitlesAndStatus();
         }
 
-        private void BtnLoadTargetData_Click(object sender, EventArgs e)
+        private void ExportTraceTable()
         {
-            LoadRequirements(cmbTargetDoc, btnLoadTargetData, "目标文档", false);
-        }
+            if (targetSnapshot == null)
+            {
+                MessageBox.Show(this, "请先导入待追踪文档。", "需求追踪");
+                return;
+            }
 
-        private void LoadRequirements(ComboBox documentComboBox, Button triggerButton, string documentRole, bool isSource)
-        {
-            Word.Document document = null;
-            bool previousUseWaitCursor = UseWaitCursor;
-            string previousButtonText = triggerButton.Text;
+            List<RequirementTraceExportRow> rows = BuildTraceExportRows();
+            if (rows.Count == 0)
+            {
+                MessageBox.Show(this, "当前模板下没有可导出的互追需求。", "需求追踪");
+                return;
+            }
+
+            DialogResult result = MessageBox.Show(
+                this,
+                "确认把需求追踪表导出到当前 Word 光标位置？",
+                "导出需求追踪表",
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Question);
+            if (result != DialogResult.OK)
+            {
+                return;
+            }
+
+            Word.Application app = GetApplication();
+            Word.Selection selection = app?.Selection;
+            Word.Document document = app?.ActiveDocument;
+            if (selection == null || document == null)
+            {
+                MessageBox.Show(this, "当前没有可插入表格的 Word 光标位置。", "需求追踪");
+                return;
+            }
+
             try
             {
-                UseWaitCursor = true;
-                triggerButton.Enabled = false;
-                triggerButton.Text = "正在解析...";
-                triggerButton.Refresh();
-                ReportLoadProgress("正在准备需求解析...");
-
-                string documentPath = GetSelectedDocumentFullName(documentComboBox);
-                if (string.IsNullOrWhiteSpace(documentPath))
-                {
-                    throw new InvalidOperationException($"请先选择一个{documentRole}。");
-                }
-
-                RequirementTrackingDocumentKind documentKind = DetectRequirementTrackingDocumentKind(documentPath);
-                if (documentKind == RequirementTrackingDocumentKind.Unknown)
-                {
-                    throw new InvalidOperationException(
-                        $"当前选择的文档不属于需求追踪支持范围。\r\n当前选择：{Path.GetFileName(documentPath)}\r\n\r\n必须选择以下四类文档之一：系统规格说明、需求规格说明、软件设计说明、软件测试说明。");
-                }
-
-                document = OpenOrResolveDocument(documentPath);
-                if (document == null)
-                {
-                    throw new InvalidOperationException($"无法打开{documentRole}，请检查文件是否存在或被占用。");
-                }
-                ReportLoadProgress($"正在解析{documentRole}：{Path.GetFileName(documentPath)}");
-
-                RequirementTrackingDocumentSnapshot loadedSnapshot = RequirementTrackingWordService.CollectRequirements(
-                    document,
-                    documentKind,
-                    message => ReportLoadProgress($"[{Path.GetFileName(documentPath)}] {message}"));
-
-                if ((loadedSnapshot.Requirements?.Count ?? 0) == 0)
-                {
-                    throw new InvalidOperationException(
-                        $"{documentRole}中未识别到需求标识。\r\n当前解析文档：{Path.GetFileName(documentPath)}\r\n文档类型：{GetDocumentKindDisplayName(documentKind)}");
-                }
-
-                mappingsBySourceId.Clear();
-                selectedTargetRequirementIds.Clear();
-                ResetSearchPlaceholder();
-                if (isSource)
-                {
-                    sourceSnapshot = loadedSnapshot;
-                }
-                else
-                {
-                    targetSnapshot = loadedSnapshot;
-                }
-
-                RenderSourceRequirements(null);
-                RenderTargetRequirements();
-                UpdateHeaders();
-                UpdateProgressLabel();
-                ReportLoadProgress($"已提取{documentRole}需求：{loadedSnapshot.Requirements.Count} 项");
+                InsertTraceTable(document, selection.Range, rows);
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, ex.Message, "需求追踪控制台");
+                MessageBox.Show(this, "导出需求追踪表失败：\r\n" + ex.Message, "需求追踪");
+            }
+        }
+
+        private List<RequirementTraceExportRow> BuildTraceExportRows()
+        {
+            Dictionary<string, RequirementItem> targetById = (targetSnapshot?.Requirements ?? new List<RequirementItem>())
+                .Where(item => item != null && !string.IsNullOrWhiteSpace(item.Id) && MatchesTargetTemplate(item))
+                .GroupBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+            List<RequirementTraceExportRow> rows = new List<RequirementTraceExportRow>();
+            foreach (RequirementItem source in (sourceSnapshot?.Requirements ?? new List<RequirementItem>()).Where(item => item != null && MatchesSourceTemplate(item)))
+            {
+                List<RequirementItem> targets = new List<RequirementItem>();
+                if (!string.IsNullOrWhiteSpace(source.Id) &&
+                    mappingsBySourceId.TryGetValue(source.Id, out RequirementTraceMapping mapping))
+                {
+                    foreach (string targetId in mapping.TargetRequirementIds.Where(item => !string.IsNullOrWhiteSpace(item)))
+                    {
+                        if (targetById.TryGetValue(targetId, out RequirementItem target))
+                        {
+                            targets.Add(target);
+                        }
+                    }
+                }
+
+                if (targets.Count == 0)
+                {
+                    rows.Add(new RequirementTraceExportRow { Source = source, SourceSpan = 1 });
+                    continue;
+                }
+
+                for (int i = 0; i < targets.Count; i++)
+                {
+                    rows.Add(new RequirementTraceExportRow
+                    {
+                        Source = source,
+                        Target = targets[i],
+                        SourceSpan = i == 0 ? targets.Count : 0
+                    });
+                }
+            }
+
+            return rows;
+        }
+
+        private void InsertTraceTable(Word.Document document, Word.Range range, List<RequirementTraceExportRow> rows)
+        {
+            RequirementTraceTableExporter.InsertTraceTable(
+                document,
+                range,
+                rows,
+                GetTemplateSideDisplayName(true),
+                GetTemplateSideDisplayName(false));
+        }
+
+        private RequirementTrackingDocumentSnapshot BuildSavedSnapshot(Word.Document document)
+        {
+            string fullName = NormalizeFilePath(document?.FullName);
+            RequirementTrackingDocumentSnapshot snapshot = new RequirementTrackingDocumentSnapshot
+            {
+                FullName = fullName,
+                DisplayName = string.IsNullOrWhiteSpace(fullName) ? "当前文档" : Path.GetFileName(fullName),
+                Requirements = RequirementExtractionPaneControl.LoadSavedRequirementItems(document) ?? new List<RequirementItem>()
+            };
+
+            if (snapshot.Requirements.Count == 0)
+            {
+                MessageBox.Show(this, $"{snapshot.DisplayName} 中没有已保存的需求提取结果。\r\n请先在该文档中使用“需求提取”，填写并点击“保存”。", "需求追踪");
+            }
+
+            return snapshot;
+        }
+
+        private Control CreateSourcePane()
+        {
+            TableLayoutPanel pane = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 3,
+                Padding = new Padding(8)
+            };
+            pane.RowStyles.Add(new RowStyle(SizeType.Absolute, 28f));
+            pane.RowStyles.Add(new RowStyle(SizeType.Absolute, 82f));
+            pane.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            pane.Controls.Add(lblSourceTitle, 0, 0);
+            pane.Controls.Add(CreateSourceToolbar(), 0, 1);
+            pane.Controls.Add(sourceContentPanel, 0, 2);
+            return WrapPane(pane);
+        }
+
+        private Control CreateTargetPane()
+        {
+            TableLayoutPanel pane = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 6,
+                Padding = new Padding(8)
+            };
+            pane.RowStyles.Add(new RowStyle(SizeType.Absolute, 28f));
+            pane.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
+            pane.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            pane.Controls.Add(lblTargetTitle, 0, 0);
+            pane.Controls.Add(CreateTargetToolbar(), 0, 1);
+            pane.Controls.Add(targetContentPanel, 0, 2);
+            return WrapPane(pane);
+        }
+
+        private Control CreateSourceToolbar()
+        {
+            TableLayoutPanel panel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 2,
+                Margin = new Padding(0)
+            };
+            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
+            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
+
+            FlowLayoutPanel filters = CreateToolbarPanel();
+            filters.Controls.Add(CreateToolbarLabel("状态"));
+            filters.Controls.Add(cmbSourceFilter);
+
+            FlowLayoutPanel nav = CreateToolbarPanel();
+            nav.Controls.Add(btnPreviousSource);
+            nav.Controls.Add(btnNextSource);
+            nav.Controls.Add(btnNextUnmappedSource);
+
+            panel.Controls.Add(filters, 0, 0);
+            panel.Controls.Add(nav, 0, 1);
+            return panel;
+        }
+
+        private Control CreateTargetToolbar()
+        {
+            FlowLayoutPanel panel = CreateToolbarPanel();
+            panel.Controls.Add(CreateToolbarLabel("状态"));
+            panel.Controls.Add(cmbTargetFilter);
+            panel.Controls.Add(CreateToolbarLabel("名称搜索"));
+            panel.Controls.Add(txtTargetSearch);
+            return panel;
+        }
+
+        private static FlowLayoutPanel CreateToolbarPanel()
+        {
+            return new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                Margin = new Padding(0)
+            };
+        }
+
+        private static TableLayoutPanel CreateCompactSourcePanel()
+        {
+            TableLayoutPanel panel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 4,
+                Padding = new Padding(0)
+            };
+            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 72f));
+            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 86f));
+            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 72f));
+            panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            return panel;
+        }
+
+        private void RenderSources(string preferredId)
+        {
+            suppressSourceChanged = true;
+            gridSource.SuspendLayout();
+            try
+            {
+                currentSourceViewItems.Clear();
+                currentSourceViewItems.AddRange(GetFilteredSourceRequirements());
+
+                selectedSource = PickSelectedSource(preferredId);
+                RenderCompactSourceCards();
+                RenderDetailedSourceGrid();
+                ApplyViewModeVisibility();
             }
             finally
             {
-                UseWaitCursor = previousUseWaitCursor;
-                triggerButton.Text = previousButtonText;
-                triggerButton.Enabled = true;
-                // 不要释放文档对象的 COM 包装器，否则会导致用户自行打开的 Word 文档后续操作抛出“脱离基础 RCW”的异常。
+                gridSource.ResumeLayout();
+                suppressSourceChanged = false;
             }
         }
 
-        private static RequirementTrackingDocumentKind DetectRequirementTrackingDocumentKind(string fullName)
+        private void RenderCompactSourceCards()
         {
-            string fileName = Path.GetFileNameWithoutExtension(fullName) ?? string.Empty;
-            if (ContainsDocumentNameToken(fileName, "系统规格说明", "系统/子系统规格说明", "系统子系统规格说明", "SSS"))
+            compactSourcePanel.SuspendLayout();
+            try
             {
-                return RequirementTrackingDocumentKind.SystemSpecification;
-            }
+                compactSourcePanel.Controls.Clear();
+                int index = GetSelectedSourceIndex();
+                RequirementItem previous = index > 0 ? currentSourceViewItems[index - 1] : null;
+                RequirementItem current = index >= 0 ? currentSourceViewItems[index] : null;
+                RequirementItem next = index >= 0 && index + 1 < currentSourceViewItems.Count ? currentSourceViewItems[index + 1] : null;
 
-            if (ContainsDocumentNameToken(fileName, "需求规格说明", "软件需求规格说明", "SRS"))
+                BindSourceCard(lblPreviousSource, "上一条", previous);
+                BindSourceCard(lblCurrentSource, "当前需求", current);
+                BindSourceCard(lblNextSource, "下一条", next);
+                compactSourcePanel.Controls.Add(lblPreviousSource, 0, 0);
+                compactSourcePanel.Controls.Add(lblCurrentSource, 0, 1);
+                compactSourcePanel.Controls.Add(lblNextSource, 0, 2);
+            }
+            finally
             {
-                return RequirementTrackingDocumentKind.RequirementSpecification;
+                compactSourcePanel.ResumeLayout();
             }
-
-            if (ContainsDocumentNameToken(fileName, "软件设计说明", "软件设计描述", "SDD", "SDS"))
-            {
-                return RequirementTrackingDocumentKind.SoftwareDesignDescription;
-            }
-
-            if (ContainsDocumentNameToken(fileName, "软件测试说明", "软件测试描述", "测试说明", "STD", "STS"))
-            {
-                return RequirementTrackingDocumentKind.SoftwareTestDescription;
-            }
-
-            return RequirementTrackingDocumentKind.Unknown;
         }
 
-        private static bool ContainsDocumentNameToken(string fileName, params string[] tokens)
+        private void RenderDetailedSourceGrid()
         {
-            if (string.IsNullOrWhiteSpace(fileName) || tokens == null)
+            int firstDisplayedRowIndex = -1;
+            try
             {
-                return false;
+                firstDisplayedRowIndex = gridSource.FirstDisplayedScrollingRowIndex;
+            }
+            catch
+            {
+                firstDisplayedRowIndex = -1;
             }
 
-            return tokens.Any(token =>
+            gridSource.Rows.Clear();
+            foreach (RequirementItem item in currentSourceViewItems.Where(item => item != null))
             {
-                if (string.IsNullOrWhiteSpace(token))
+                int row = gridSource.Rows.Add(RequirementItem.GetDisplayRequirementId(item.Id), item.Name ?? string.Empty, item.SectionNumber ?? string.Empty);
+                gridSource.Rows[row].Tag = item;
+                if (HasMappedTargets(item.Id))
                 {
-                    return false;
+                    gridSource.Rows[row].DefaultCellStyle.ForeColor = Color.FromArgb(22, 120, 70);
                 }
+            }
 
-                if (Regex.IsMatch(token, @"^[A-Za-z0-9]+$"))
+            int selected = FindRowByRequirementId(gridSource, selectedSource?.Id);
+            if (selected >= 0)
+            {
+                gridSource.ClearSelection();
+                gridSource.Rows[selected].Selected = true;
+                gridSource.CurrentCell = gridSource.Rows[selected].Cells[0];
+            }
+
+            if (firstDisplayedRowIndex >= 0 && gridSource.Rows.Count > 0)
+            {
+                try
                 {
-                    return Regex.IsMatch(
-                        fileName,
-                        $@"(^|[^A-Za-z0-9]){Regex.Escape(token)}([^A-Za-z0-9]|$)",
-                        RegexOptions.IgnoreCase);
+                    gridSource.FirstDisplayedScrollingRowIndex = Math.Min(firstDisplayedRowIndex, gridSource.Rows.Count - 1);
                 }
-
-                return fileName.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0;
-            });
-        }
-
-        private static string GetDocumentKindDisplayName(RequirementTrackingDocumentKind documentKind)
-        {
-            switch (documentKind)
-            {
-                case RequirementTrackingDocumentKind.SystemSpecification:
-                    return "系统规格说明";
-                case RequirementTrackingDocumentKind.RequirementSpecification:
-                    return "需求规格说明";
-                case RequirementTrackingDocumentKind.SoftwareDesignDescription:
-                    return "软件设计说明";
-                case RequirementTrackingDocumentKind.SoftwareTestDescription:
-                    return "软件测试说明";
-                default:
-                    return "未知文档";
-            }
-        }
-
-        private void BtnBrowseSourceDoc_Click(object sender, EventArgs e)
-        {
-            BrowseAndSelectDocument(cmbSourceDoc);
-        }
-
-        private void BtnBrowseTargetDoc_Click(object sender, EventArgs e)
-        {
-            BrowseAndSelectDocument(cmbTargetDoc);
-        }
-
-        private void LstSourceReqs_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            if (suppressSourceSelection)
-            {
-                return;
-            }
-
-            RenderTargetRequirements();
-        }
-
-        private void BtnReverseTrace_Click(object sender, EventArgs e)
-        {
-            string sourceFullName = GetSelectedDocumentFullName(cmbSourceDoc);
-            string targetFullName = GetSelectedDocumentFullName(cmbTargetDoc);
-
-            RequirementTrackingDocumentSnapshot swappedSourceSnapshot = targetSnapshot;
-            RequirementTrackingDocumentSnapshot swappedTargetSnapshot = sourceSnapshot;
-
-            sourceSnapshot = swappedSourceSnapshot;
-            targetSnapshot = swappedTargetSnapshot;
-
-            mappingsBySourceId.Clear();
-            selectedTargetRequirementIds.Clear();
-            suppressTargetChecks = false;
-            ResetSearchPlaceholder();
-
-            if (!string.IsNullOrWhiteSpace(targetFullName))
-            {
-                SelectDocumentByFullName(cmbSourceDoc, targetFullName);
-            }
-
-            if (!string.IsNullOrWhiteSpace(sourceFullName))
-            {
-                SelectDocumentByFullName(cmbTargetDoc, sourceFullName);
-            }
-
-            RenderSourceRequirements(null);
-            RenderTargetRequirements();
-            UpdateHeaders();
-            UpdateProgressLabel();
-        }
-
-        private void ChkListTargetReqs_ItemCheck(object sender, ItemCheckEventArgs e)
-        {
-            if (suppressTargetChecks)
-            {
-                return;
-            }
-
-            RequirementItem currentSourceRequirement = GetSelectedSourceRequirement();
-            if (e.Index < 0 || e.Index >= visibleTargetRequirements.Count)
-            {
-                return;
-            }
-
-            RequirementItem targetRequirement = visibleTargetRequirements[e.Index];
-            if (!string.IsNullOrWhiteSpace(targetRequirement?.Id))
-            {
-                if (e.NewValue == CheckState.Checked)
+                catch
                 {
-                    selectedTargetRequirementIds.Add(targetRequirement.Id);
+                }
+            }
+        }
+
+        private void RenderTargets()
+        {
+            suppressTargetChanged = true;
+            try
+            {
+                if (IsCompactView())
+                {
+                    RenderTargetGrid(gridTargetRecommended, GetRecommendedTargets());
+                    gridTargetAll.Rows.Clear();
                 }
                 else
                 {
-                    selectedTargetRequirementIds.Remove(targetRequirement.Id);
+                    RenderTargetGrid(gridTargetAll, GetVisibleTargets());
+                    gridTargetRecommended.Rows.Clear();
                 }
             }
-
-            if (currentSourceRequirement != null)
+            finally
             {
-                SetMappingState(
-                    currentSourceRequirement.Id,
-                    targetRequirement.Id,
-                    e.NewValue == CheckState.Checked);
-                RenderSourceRequirements(currentSourceRequirement.Id);
-            }
-            UpdateProgressLabel();
-        }
-
-        private void TxtSearchTarget_TextChanged(object sender, EventArgs e)
-        {
-            if (suppressSearchRefresh)
-            {
-                return;
+                suppressTargetChanged = false;
             }
 
-            RenderTargetRequirements();
+            ApplyViewModeVisibility();
+            UpdateTitlesAndStatus();
         }
 
-        private void TxtSearchTarget_Enter(object sender, EventArgs e)
+        private void RenderTargetGrid(DataGridView grid, IEnumerable<RequirementItem> targets)
         {
-            if (!IsSearchPlaceholderActive())
-            {
-                return;
-            }
-
-            suppressSearchRefresh = true;
-            txtSearchTarget.Text = string.Empty;
-            txtSearchTarget.ForeColor = SystemColors.WindowText;
-            suppressSearchRefresh = false;
-        }
-
-        private void TxtSearchTarget_Leave(object sender, EventArgs e)
-        {
-            if (!string.IsNullOrWhiteSpace(txtSearchTarget.Text))
-            {
-                return;
-            }
-
-            ResetSearchPlaceholder();
-        }
-
-        private void RenderSourceRequirements(string preferredSourceRequirementId)
-        {
-            suppressSourceSelection = true;
-            lstSourceReqs.BeginUpdate();
+            RequirementItem source = GetSelectedSourceRequirement();
+            int firstDisplayedRowIndex = -1;
             try
             {
-                lstSourceReqs.Items.Clear();
+                firstDisplayedRowIndex = grid.FirstDisplayedScrollingRowIndex;
+            }
+            catch
+            {
+                firstDisplayedRowIndex = -1;
+            }
 
-                IReadOnlyList<RequirementItem> requirements = sourceSnapshot?.Requirements ?? new List<RequirementItem>();
-                foreach (RequirementItem requirement in requirements.Where(item => item != null))
+            grid.SuspendLayout();
+            try
+            {
+                grid.Rows.Clear();
+                foreach (RequirementItem target in targets.Where(item => item != null))
                 {
-                    requirement.IsMapped = HasMappedTargets(requirement.Id);
-                    lstSourceReqs.Items.Add(new SourceRequirementListEntry(requirement));
-                }
-
-                if (lstSourceReqs.Items.Count > 0)
-                {
-                    int selectedIndex = 0;
-                    if (!string.IsNullOrWhiteSpace(preferredSourceRequirementId))
+                    bool mapped = source != null && IsMappedToCurrentSource(source.Id, target.Id);
+                    int row = grid.Rows.Add(mapped, RequirementItem.GetDisplayRequirementId(target.Id), target.Name ?? string.Empty, target.SectionNumber ?? string.Empty);
+                    grid.Rows[row].Tag = target;
+                    if (IsTargetMappedToAnySource(target.Id))
                     {
-                        for (int i = 0; i < lstSourceReqs.Items.Count; i++)
-                        {
-                            SourceRequirementListEntry entry = lstSourceReqs.Items[i] as SourceRequirementListEntry;
-                            if (string.Equals(entry?.Requirement?.Id, preferredSourceRequirementId, StringComparison.OrdinalIgnoreCase))
-                            {
-                                selectedIndex = i;
-                                break;
-                            }
-                        }
+                        grid.Rows[row].DefaultCellStyle.ForeColor = Color.FromArgb(22, 120, 70);
                     }
-
-                    lstSourceReqs.SelectedIndex = selectedIndex;
                 }
-            }
-            finally
-            {
-                lstSourceReqs.EndUpdate();
-                suppressSourceSelection = false;
-            }
-        }
 
-        private void RenderTargetRequirements()
-        {
-            visibleTargetRequirements.Clear();
-            suppressTargetChecks = true;
-            chkListTargetReqs.BeginUpdate();
-            try
-            {
-                chkListTargetReqs.Items.Clear();
-
-                RequirementItem currentSourceRequirement = GetSelectedSourceRequirement();
-                IEnumerable<RequirementItem> filteredTargets = (IEnumerable<RequirementItem>)(targetSnapshot?.Requirements ?? new List<RequirementItem>())
-                    .Where(item => item != null)
-                    .Where(MatchesTargetFilter);
-
-                foreach (RequirementItem targetRequirement in filteredTargets)
+                RestoreTargetSelection(grid);
+                if (firstDisplayedRowIndex >= 0 && grid.Rows.Count > 0)
                 {
-                    int itemIndex = chkListTargetReqs.Items.Add(targetRequirement);
-                    visibleTargetRequirements.Add(targetRequirement);
-                    bool shouldCheck = !string.IsNullOrWhiteSpace(targetRequirement.Id) &&
-                                       (selectedTargetRequirementIds.Contains(targetRequirement.Id) ||
-                                        (currentSourceRequirement != null && IsMappedToCurrentSource(currentSourceRequirement.Id, targetRequirement.Id)));
-                    chkListTargetReqs.SetItemChecked(itemIndex, shouldCheck);
-                }
-            }
-            finally
-            {
-                chkListTargetReqs.EndUpdate();
-                suppressTargetChecks = false;
-            }
-        }
-
-        private void UpdateHeaders()
-        {
-            int targetCount = targetSnapshot?.Requirements?.Count ?? 0;
-            lblSourceHeader.Text = "章节号 / 标识 / 名称";
-            lblTargetHeader.Text = targetCount > 0 ? $"章节号 / 标识 / 名称（{targetCount}）" : "章节号 / 标识 / 名称";
-        }
-
-        private void UpdateProgressLabel()
-        {
-            int totalRequirements = sourceSnapshot?.Requirements?.Count ?? 0;
-            int trackedRequirements = selectedTargetRequirementIds.Count;
-            lblProgress.Text = $"已提取需求：{trackedRequirements}/{totalRequirements}";
-        }
-
-        private void ReportLoadProgress(string message)
-        {
-            lblProgress.Text = string.IsNullOrWhiteSpace(message) ? "正在解析需求数据..." : message;
-            lblProgress.Refresh();
-            Application.DoEvents();
-        }
-
-        private void BindDocumentOptions(ComboBox comboBox, string preferredFullName)
-        {
-            comboBox.BeginUpdate();
-            try
-            {
-                comboBox.Items.Clear();
-                foreach (RequirementTrackingDocumentOption option in openDocumentOptions)
-                {
-                    comboBox.Items.Add(option);
-                }
-            }
-            finally
-            {
-                comboBox.EndUpdate();
-            }
-
-            if (comboBox.Items.Count == 0)
-            {
-                return;
-            }
-
-            if (!string.IsNullOrWhiteSpace(preferredFullName))
-            {
-                for (int i = 0; i < comboBox.Items.Count; i++)
-                {
-                    RequirementTrackingDocumentOption option = comboBox.Items[i] as RequirementTrackingDocumentOption;
-                    if (option != null && string.Equals(option.FullName, preferredFullName, StringComparison.OrdinalIgnoreCase))
+                    try
                     {
-                        comboBox.SelectedIndex = i;
-                        return;
+                        grid.FirstDisplayedScrollingRowIndex = Math.Min(firstDisplayedRowIndex, grid.Rows.Count - 1);
+                    }
+                    catch
+                    {
                     }
                 }
             }
-
-            if (comboBox.SelectedIndex < 0)
+            finally
             {
-                comboBox.SelectedIndex = 0;
+                grid.ResumeLayout();
             }
         }
 
-        private IReadOnlyList<RequirementTrackingDocumentOption> BuildDocumentOptions()
+        private IEnumerable<RequirementItem> GetFilteredSourceRequirements()
         {
-            Dictionary<string, RequirementTrackingDocumentOption> optionMap =
-                new Dictionary<string, RequirementTrackingDocumentOption>(StringComparer.OrdinalIgnoreCase);
-            string activeDocumentFullName = GetActiveDocumentFullName();
-
-            foreach (DocumentGroupDocumentItem document in GetActiveGroupDocuments())
-            {
-                string fullPath = NormalizeFilePath(document?.FilePath);
-                if (string.IsNullOrWhiteSpace(fullPath))
-                {
-                    continue;
-                }
-
-                RequirementTrackingDocumentOption option;
-                if (!optionMap.TryGetValue(fullPath, out option))
-                {
-                    option = new RequirementTrackingDocumentOption
-                    {
-                        FullName = fullPath,
-                        DisplayName = Path.GetFileName(fullPath)
-                    };
-                    optionMap[fullPath] = option;
-                }
-
-                option.IsFromActiveGroup = true;
-                if (string.IsNullOrWhiteSpace(option.DisplayName))
-                {
-                    option.DisplayName = Path.GetFileName(fullPath);
-                }
-            }
-
-            if (!string.IsNullOrWhiteSpace(activeDocumentFullName))
-            {
-                RequirementTrackingDocumentOption option;
-                if (!optionMap.TryGetValue(activeDocumentFullName, out option))
-                {
-                    option = new RequirementTrackingDocumentOption
-                    {
-                        FullName = activeDocumentFullName,
-                        DisplayName = Path.GetFileName(activeDocumentFullName)
-                    };
-                    optionMap[activeDocumentFullName] = option;
-                }
-
-                option.IsCurrentlyOpen = true;
-            }
-
-            foreach (string manuallySelectedPath in manuallySelectedDocumentPaths)
-            {
-                string fullPath = NormalizeFilePath(manuallySelectedPath);
-                if (string.IsNullOrWhiteSpace(fullPath))
-                {
-                    continue;
-                }
-
-                RequirementTrackingDocumentOption option;
-                if (!optionMap.TryGetValue(fullPath, out option))
-                {
-                    option = new RequirementTrackingDocumentOption
-                    {
-                        FullName = fullPath,
-                        DisplayName = Path.GetFileName(fullPath)
-                    };
-                    optionMap[fullPath] = option;
-                }
-            }
-
-            return optionMap.Values
-                .OrderByDescending(item => item.IsFromActiveGroup)
-                .ThenByDescending(item => item.IsCurrentlyOpen)
-                .ThenBy(item => item.DisplayName ?? string.Empty, StringComparer.CurrentCultureIgnoreCase)
+            IEnumerable<RequirementItem> items = sourceSnapshot?.Requirements ?? Enumerable.Empty<RequirementItem>();
+            return items.Where(item => item != null)
+                .Where(MatchesSourceTemplate)
+                .Where(MatchesSourceFilter)
                 .ToList();
         }
 
-        private void ApplyPreferredDocumentSelections(string previousSourceFullName, string previousTargetFullName)
+        private IEnumerable<RequirementItem> GetVisibleTargets()
         {
-            if (string.IsNullOrWhiteSpace(previousSourceFullName))
-            {
-                RequirementTrackingDocumentOption preferredSource = FindPreferredDocument("任务书", "sss", "系统/子系统规格说明");
-                if (preferredSource == null && openDocumentOptions.Count > 0)
-                {
-                    preferredSource = openDocumentOptions[0];
-                }
-
-                SelectDocumentOption(cmbSourceDoc, preferredSource);
-            }
-
-            if (string.IsNullOrWhiteSpace(previousTargetFullName))
-            {
-                RequirementTrackingDocumentOption preferredTarget = FindCurrentlyOpenDocument();
-                if (preferredTarget == null)
-                {
-                    preferredTarget = FindPreferredDocument("需求规格说明", "srs");
-                }
-
-                if (preferredTarget == null && openDocumentOptions.Count > 1)
-                {
-                    string sourceFullName = GetSelectedDocumentFullName(cmbSourceDoc);
-                    preferredTarget = openDocumentOptions.FirstOrDefault(option =>
-                        !string.Equals(option.FullName, sourceFullName, StringComparison.OrdinalIgnoreCase));
-                }
-
-                if (preferredTarget == null && openDocumentOptions.Count > 0)
-                {
-                    preferredTarget = openDocumentOptions[0];
-                }
-
-                SelectDocumentOption(cmbTargetDoc, preferredTarget);
-            }
+            IEnumerable<RequirementItem> items = targetSnapshot?.Requirements ?? Enumerable.Empty<RequirementItem>();
+            return items.Where(item => item != null)
+                .Where(MatchesTargetTemplate)
+                .Where(MatchesTargetFilter)
+                .ToList();
         }
 
-        private RequirementTrackingDocumentOption FindPreferredDocument(params string[] keywords)
+        private IEnumerable<RequirementItem> GetRecommendedTargets()
         {
-            return openDocumentOptions
-                .OrderByDescending(option => option?.IsFromActiveGroup ?? false)
-                .ThenByDescending(option => option?.IsCurrentlyOpen ?? false)
-                .FirstOrDefault(option =>
+            RequirementItem source = GetSelectedSourceRequirement();
+            if (source == null)
             {
-                string text = $"{option?.DisplayName} {option?.FullName}";
-                return keywords.Any(keyword =>
-                    !string.IsNullOrWhiteSpace(keyword) &&
-                    text.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0);
-            });
+                return Enumerable.Empty<RequirementItem>();
+            }
+
+            HashSet<string> keywords = ExtractKeywords(source.Name);
+            if (keywords.Count == 0)
+            {
+                return Enumerable.Empty<RequirementItem>();
+            }
+
+            return GetVisibleTargets()
+                .Select(target => new { Target = target, Score = GetNameScore(keywords, target.Name) })
+                .Where(item => item.Score > 0)
+                .OrderByDescending(item => item.Score)
+                .ThenBy(item => IsTargetMappedToAnySource(item.Target.Id))
+                .ThenBy(item => item.Target.Id ?? string.Empty, StringComparer.CurrentCultureIgnoreCase)
+                .Take(20)
+                .Select(item => item.Target)
+                .ToList();
         }
 
-        private RequirementTrackingDocumentOption FindCurrentlyOpenDocument()
+        private RequirementItem PickSelectedSource(string preferredId)
         {
-            string activeDocumentFullName = GetActiveDocumentFullName();
-            if (string.IsNullOrWhiteSpace(activeDocumentFullName))
+            if (currentSourceViewItems.Count == 0)
             {
                 return null;
             }
 
-            return openDocumentOptions.FirstOrDefault(option =>
-                string.Equals(option?.FullName, activeDocumentFullName, StringComparison.OrdinalIgnoreCase));
+            RequirementItem preferred = null;
+            if (!string.IsNullOrWhiteSpace(preferredId))
+            {
+                preferred = currentSourceViewItems.FirstOrDefault(item => string.Equals(item.Id, preferredId, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (preferred == null && selectedSource != null)
+            {
+                preferred = currentSourceViewItems.FirstOrDefault(item => string.Equals(item.Id, selectedSource.Id, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return preferred ?? currentSourceViewItems[0];
         }
 
-        private void SelectDocumentOption(ComboBox comboBox, RequirementTrackingDocumentOption option)
+        private void ApplyViewModeVisibility()
         {
-            if (comboBox == null || option == null)
-            {
-                if (comboBox != null && comboBox.Items.Count > 0 && comboBox.SelectedIndex < 0)
-                {
-                    comboBox.SelectedIndex = 0;
-                }
+            bool compact = IsCompactView();
+            compactSourcePanel.Visible = compact;
+            gridSource.Visible = !compact;
+            recommendedTargetPanel.Visible = compact;
+            allTargetPanel.Visible = !compact;
+            btnPreviousSource.Enabled = selectedSource != null;
+            btnNextSource.Enabled = selectedSource != null;
+            btnNextUnmappedSource.Enabled = selectedSource != null;
+        }
 
+        private void RefreshViewPreservingSelection()
+        {
+            string id = selectedSource?.Id;
+            RenderSources(id);
+            RenderTargets();
+            UpdateTitlesAndStatus();
+        }
+
+        private void GridSource_SelectionChanged(object sender, EventArgs e)
+        {
+            if (suppressSourceChanged || !gridSource.Visible)
+            {
                 return;
             }
 
-            for (int i = 0; i < comboBox.Items.Count; i++)
+            RequirementItem item = gridSource.CurrentRow?.Tag as RequirementItem;
+            if (item == null)
             {
-                RequirementTrackingDocumentOption current = comboBox.Items[i] as RequirementTrackingDocumentOption;
-                if (current != null && string.Equals(current.FullName, option.FullName, StringComparison.OrdinalIgnoreCase))
-                {
-                    comboBox.SelectedIndex = i;
-                    return;
-                }
+                return;
+            }
+
+            if (selectedSource != null && string.Equals(selectedSource.Id, item.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            selectedSource = item;
+            RenderCompactSourceCards();
+            RenderTargets();
+        }
+
+        private void GridTarget_CurrentCellDirtyStateChanged(object sender, EventArgs e)
+        {
+            DataGridView grid = sender as DataGridView;
+            if (grid?.IsCurrentCellDirty == true)
+            {
+                grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
             }
         }
 
-        private int FindSourceRequirementIndex(string sourceRequirementId)
+        private void GridTarget_CellValueChanged(object sender, DataGridViewCellEventArgs e)
         {
-            if (string.IsNullOrWhiteSpace(sourceRequirementId))
+            if (suppressTargetChanged || e.RowIndex < 0 || e.ColumnIndex != 0)
+            {
+                return;
+            }
+
+            DataGridView grid = sender as DataGridView;
+            RequirementItem source = GetSelectedSourceRequirement();
+            RequirementItem target = grid?.Rows[e.RowIndex].Tag as RequirementItem;
+            if (source == null || target == null)
+            {
+                return;
+            }
+
+            selectedTargetId = target.Id;
+            bool isMapped = Convert.ToBoolean(grid.Rows[e.RowIndex].Cells[0].Value ?? false);
+            SetMappingState(source.Id, target.Id, isMapped);
+            SaveTraceMappingsToSourceDocument();
+            RenderSources(source.Id);
+            RenderTargets();
+        }
+
+        private void GridTarget_SelectionChanged(object sender, EventArgs e)
+        {
+            if (suppressTargetChanged)
+            {
+                return;
+            }
+
+            DataGridView grid = sender as DataGridView;
+            RequirementItem target = grid?.CurrentRow?.Tag as RequirementItem;
+            if (target == null || string.IsNullOrWhiteSpace(target.Id))
+            {
+                return;
+            }
+
+            selectedTargetId = target.Id;
+        }
+
+        private void SelectAdjacentSource(int offset)
+        {
+            int index = GetSelectedSourceIndex();
+            if (index < 0)
+            {
+                return;
+            }
+
+            int nextIndex = Math.Max(0, Math.Min(currentSourceViewItems.Count - 1, index + offset));
+            SelectSource(currentSourceViewItems[nextIndex]);
+        }
+
+        private void SelectNextUnmappedSource()
+        {
+            List<RequirementItem> all = currentSourceViewItems
+                .Where(item => item != null)
+                .ToList();
+            if (all.Count == 0)
+            {
+                return;
+            }
+
+            int currentIndex = all.FindIndex(item => string.Equals(item.Id, selectedSource?.Id, StringComparison.OrdinalIgnoreCase));
+            int start = currentIndex < 0 ? 0 : currentIndex + 1;
+            RequirementItem next = all.Skip(start).Concat(all.Take(start)).FirstOrDefault(item => !HasMappedTargets(item.Id));
+            if (next != null)
+            {
+                SelectSource(next);
+            }
+        }
+
+        private void SelectSource(RequirementItem item)
+        {
+            if (item == null)
+            {
+                return;
+            }
+
+            selectedSource = item;
+            RenderSources(item.Id);
+            RenderTargets();
+        }
+
+        private int GetSelectedSourceIndex()
+        {
+            if (selectedSource == null)
             {
                 return -1;
             }
 
-            for (int i = 0; i < lstSourceReqs.Items.Count; i++)
-            {
-                SourceRequirementListEntry entry = lstSourceReqs.Items[i] as SourceRequirementListEntry;
-                if (entry?.Requirement == null)
-                {
-                    continue;
-                }
-
-                if (string.Equals(entry.Requirement.Id, sourceRequirementId, StringComparison.OrdinalIgnoreCase))
-                {
-                    return i;
-                }
-            }
-
-            return -1;
+            return currentSourceViewItems.FindIndex(item => string.Equals(item.Id, selectedSource.Id, StringComparison.OrdinalIgnoreCase));
         }
 
         private RequirementItem GetSelectedSourceRequirement()
         {
-            SourceRequirementListEntry entry = lstSourceReqs.SelectedItem as SourceRequirementListEntry;
-            return entry?.Requirement;
+            return selectedSource;
         }
 
-        private bool MatchesTargetFilter(RequirementItem requirement)
+        private bool MatchesSourceFilter(RequirementItem item)
         {
-            if (requirement == null)
+            switch (GetFilterMode(cmbSourceFilter))
+            {
+                case FilterMode.Mapped:
+                    return HasMappedTargets(item.Id);
+                case FilterMode.Unmapped:
+                    return !HasMappedTargets(item.Id);
+                default:
+                    return true;
+            }
+        }
+
+        private bool MatchesTargetFilter(RequirementItem item)
+        {
+            if (!MatchesTargetStatusFilter(item))
             {
                 return false;
             }
 
-            string searchText = GetEffectiveSearchText();
-            if (string.IsNullOrWhiteSpace(searchText))
-            {
-                return true;
-            }
-
-            return requirement.Id?.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   requirement.Name?.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                   requirement.SectionNumber?.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0;
+            string search = (txtTargetSearch.Text ?? string.Empty).Trim();
+            return string.IsNullOrWhiteSpace(search) ||
+                   (item.Name ?? string.Empty).IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
-        private void SetMappingState(string sourceRequirementId, string targetRequirementId, bool isMapped)
+        private bool MatchesTargetStatusFilter(RequirementItem item)
         {
-            if (string.IsNullOrWhiteSpace(sourceRequirementId) || string.IsNullOrWhiteSpace(targetRequirementId))
+            switch (GetFilterMode(cmbTargetFilter))
+            {
+                case FilterMode.Mapped:
+                    return IsTargetMappedToAnySource(item.Id);
+                case FilterMode.Unmapped:
+                    return !IsTargetMappedToAnySource(item.Id);
+                default:
+                    return true;
+            }
+        }
+
+        private void SetMappingState(string sourceId, string targetId, bool isMapped)
+        {
+            if (string.IsNullOrWhiteSpace(sourceId) || string.IsNullOrWhiteSpace(targetId))
             {
                 return;
             }
 
-            RequirementTraceMapping mapping;
-            if (!mappingsBySourceId.TryGetValue(sourceRequirementId, out mapping))
+            if (!mappingsBySourceId.TryGetValue(sourceId, out RequirementTraceMapping mapping))
             {
                 if (!isMapped)
                 {
                     return;
                 }
 
-                mapping = new RequirementTraceMapping
-                {
-                    SourceRequirementId = sourceRequirementId
-                };
-                mappingsBySourceId[sourceRequirementId] = mapping;
+                mapping = new RequirementTraceMapping { SourceRequirementId = sourceId };
+                mappingsBySourceId[sourceId] = mapping;
             }
 
-            bool alreadyMapped = mapping.TargetRequirementIds.Any(item =>
-                string.Equals(item, targetRequirementId, StringComparison.OrdinalIgnoreCase));
-
-            if (isMapped && !alreadyMapped)
+            bool exists = mapping.TargetRequirementIds.Any(item => string.Equals(item, targetId, StringComparison.OrdinalIgnoreCase));
+            if (isMapped && !exists)
             {
-                mapping.TargetRequirementIds.Add(targetRequirementId);
+                mapping.TargetRequirementIds.Add(targetId);
             }
-            else if (!isMapped && alreadyMapped)
+            else if (!isMapped && exists)
             {
                 mapping.TargetRequirementIds = mapping.TargetRequirementIds
-                    .Where(item => !string.Equals(item, targetRequirementId, StringComparison.OrdinalIgnoreCase))
+                    .Where(item => !string.Equals(item, targetId, StringComparison.OrdinalIgnoreCase))
                     .ToList();
             }
 
             if (mapping.TargetRequirementIds.Count == 0)
             {
-                mappingsBySourceId.Remove(sourceRequirementId);
+                mappingsBySourceId.Remove(sourceId);
             }
         }
 
-        private bool IsMappedToCurrentSource(string sourceRequirementId, string targetRequirementId)
+        private void LoadTraceMappings(Word.Document doc)
         {
-            if (string.IsNullOrWhiteSpace(sourceRequirementId) || string.IsNullOrWhiteSpace(targetRequirementId))
+            mappingsBySourceId.Clear();
+            Office.CustomXMLPart part = FindSavedTraceMappingPart(doc);
+            if (part == null)
             {
-                return false;
+                return;
             }
 
-            RequirementTraceMapping mapping;
-            if (!mappingsBySourceId.TryGetValue(sourceRequirementId, out mapping))
-            {
-                return false;
-            }
-
-            return mapping.TargetRequirementIds.Any(item =>
-                string.Equals(item, targetRequirementId, StringComparison.OrdinalIgnoreCase));
-        }
-
-        private bool HasMappedTargets(string sourceRequirementId)
-        {
-            if (string.IsNullOrWhiteSpace(sourceRequirementId))
-            {
-                return false;
-            }
-
-            RequirementTraceMapping mapping;
-            if (!mappingsBySourceId.TryGetValue(sourceRequirementId, out mapping))
-            {
-                return false;
-            }
-
-            return mapping.TargetRequirementIds.Any(item => !string.IsNullOrWhiteSpace(item));
-        }
-
-        private string GetSelectedDocumentFullName(ComboBox comboBox)
-        {
-            RequirementTrackingDocumentOption option = comboBox?.SelectedItem as RequirementTrackingDocumentOption;
-            return option?.FullName ?? string.Empty;
-        }
-
-        private string GetEffectiveSearchText()
-        {
-            if (IsSearchPlaceholderActive())
-            {
-                return string.Empty;
-            }
-
-            return (txtSearchTarget.Text ?? string.Empty).Trim();
-        }
-
-        private bool IsSearchPlaceholderActive()
-        {
-            return string.Equals(txtSearchTarget.Text, SearchPlaceholderText, StringComparison.Ordinal);
-        }
-
-        private void ResetSearchPlaceholder()
-        {
-            suppressSearchRefresh = true;
-            txtSearchTarget.Text = SearchPlaceholderText;
-            txtSearchTarget.ForeColor = Color.Gray;
-            suppressSearchRefresh = false;
-        }
-
-        private Word.Application GetApplication()
-        {
-            return applicationAccessor?.Invoke();
-        }
-
-        private string GetActiveDocumentFullName()
-        {
             try
             {
-                Word.Document activeDocument = GetApplication()?.ActiveDocument;
-                return NormalizeFilePath(activeDocument?.FullName);
+                XDocument document = XDocument.Parse(part.XML);
+                XName mappingName = XName.Get("mapping", SavedTraceMappingsNamespace);
+                XName targetName = XName.Get("target", SavedTraceMappingsNamespace);
+                string currentTemplate = GetCurrentTraceTemplate().ToString();
+                bool hasTemplateTags = document.Descendants(mappingName).Any(element => element.Attribute("template") != null);
+                foreach (XElement mappingElement in document.Descendants(mappingName))
+                {
+                    string template = (string)mappingElement.Attribute("template") ?? string.Empty;
+                    if (hasTemplateTags && !string.Equals(template, currentTemplate, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    string sourceId = (string)mappingElement.Attribute("sourceId") ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(sourceId))
+                    {
+                        continue;
+                    }
+
+                    RequirementTraceMapping mapping = new RequirementTraceMapping { SourceRequirementId = sourceId };
+                    foreach (XElement targetElement in mappingElement.Elements(targetName))
+                    {
+                        string targetId = (string)targetElement.Attribute("id") ?? string.Empty;
+                        if (!string.IsNullOrWhiteSpace(targetId))
+                        {
+                            mapping.TargetRequirementIds.Add(targetId);
+                        }
+                    }
+
+                    if (mapping.TargetRequirementIds.Count > 0)
+                    {
+                        mappingsBySourceId[sourceId] = mapping;
+                    }
+                }
             }
             catch
             {
-                return string.Empty;
+                mappingsBySourceId.Clear();
             }
         }
 
-        private void BrowseAndSelectDocument(ComboBox targetComboBox)
+        private void LoadTraceMappingsFromSourceDocument()
         {
-            using (OpenFileDialog dialog = new OpenFileDialog())
+            Word.Document doc = GetSourceDocument();
+            if (doc == null)
             {
-                dialog.Title = "选择 Word 文档";
-                dialog.Filter = "Word 文档|*.docx;*.doc;*.docm|所有文件|*.*";
-                dialog.FilterIndex = 1;
-                dialog.Multiselect = false;
-                dialog.CheckFileExists = true;
-                dialog.CheckPathExists = true;
-                dialog.RestoreDirectory = true;
+                mappingsBySourceId.Clear();
+                return;
+            }
 
-                DialogResult result = ShowFileDialog(dialog);
-                if (result != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.FileName))
+            try
+            {
+                LoadTraceMappings(doc);
+            }
+            finally
+            {
+                ReleaseComObject(doc);
+            }
+        }
+
+        private void SaveTraceMappingsToSourceDocument()
+        {
+            Word.Document doc = GetSourceDocument();
+            if (doc == null)
+            {
+                return;
+            }
+
+            try
+            {
+                Office.CustomXMLPart part = FindSavedTraceMappingPart(doc);
+                string existingXml = part?.XML ?? string.Empty;
+                string updatedXml = BuildTraceMappingsXml(existingXml);
+                if (part != null)
                 {
-                    return;
+                    part.Delete();
                 }
 
-                string selectedPath = NormalizeFilePath(dialog.FileName);
-                if (string.IsNullOrWhiteSpace(selectedPath))
+                doc.CustomXMLParts.Add(updatedXml);
+            }
+            catch
+            {
+            }
+            finally
+            {
+                ReleaseComObject(doc);
+            }
+        }
+
+        private string BuildTraceMappingsXml(string existingXml)
+        {
+            XElement root = null;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(existingXml))
                 {
-                    return;
+                    root = XDocument.Parse(existingXml).Root;
                 }
+            }
+            catch
+            {
+                root = null;
+            }
 
-                EnsureDocumentOptionExists(selectedPath);
-                openDocumentOptions.Clear();
-                openDocumentOptions.AddRange(BuildDocumentOptions());
-                EnsureDocumentOptionExists(selectedPath);
-                BindDocumentOptions(targetComboBox, selectedPath);
-                SelectDocumentByFullName(targetComboBox, selectedPath);
+            if (root == null)
+            {
+                root = new XElement(XName.Get("traceMappings", SavedTraceMappingsNamespace));
+            }
+
+            string currentTemplate = GetCurrentTraceTemplate().ToString();
+            XName mappingName = XName.Get("mapping", SavedTraceMappingsNamespace);
+            bool hasTemplateTags = root.Elements(mappingName).Any(element => element.Attribute("template") != null);
+            if (hasTemplateTags)
+            {
+                root.Elements(mappingName)
+                    .Where(element => string.Equals((string)element.Attribute("template") ?? string.Empty, currentTemplate, StringComparison.OrdinalIgnoreCase))
+                    .Remove();
+            }
+            else
+            {
+                root.Elements(mappingName).Remove();
+            }
+
+            foreach (RequirementTraceMapping mapping in mappingsBySourceId.Values
+                .Where(mapping => mapping != null &&
+                                  !string.IsNullOrWhiteSpace(mapping.SourceRequirementId) &&
+                                  mapping.TargetRequirementIds.Any(id => !string.IsNullOrWhiteSpace(id))))
+            {
+                root.Add(new XElement(mappingName,
+                    new XAttribute("template", currentTemplate),
+                    new XAttribute("sourceId", mapping.SourceRequirementId ?? string.Empty),
+                    mapping.TargetRequirementIds
+                        .Where(id => !string.IsNullOrWhiteSpace(id))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Select(id =>
+                            new XElement(XName.Get("target", SavedTraceMappingsNamespace),
+                                new XAttribute("id", id)))));
+            }
+
+            return root.ToString(SaveOptions.DisableFormatting);
+        }
+
+        private static void DeleteSavedTraceMappingParts(Word.Document doc)
+        {
+            Office.CustomXMLPart part;
+            while ((part = FindSavedTraceMappingPart(doc)) != null)
+            {
+                part.Delete();
             }
         }
 
-        private DialogResult ShowFileDialog(FileDialog dialog)
+        private static Office.CustomXMLPart FindSavedTraceMappingPart(Word.Document doc)
         {
-            if (dialog == null)
+            if (doc == null)
             {
-                return DialogResult.Cancel;
+                return null;
             }
 
             try
             {
-                return dialog.ShowDialog(this);
+                Office.CustomXMLParts parts = doc.CustomXMLParts.SelectByNamespace(SavedTraceMappingsNamespace);
+                return parts != null && parts.Count > 0 ? parts[1] : null;
             }
             catch
             {
-                return dialog.ShowDialog();
+                return null;
             }
         }
 
-        private Word.Document OpenOrResolveDocument(string fullName)
+        private static void ReleaseComObject(object comObject)
         {
-            if (string.IsNullOrWhiteSpace(fullName))
+            if (comObject == null || !System.Runtime.InteropServices.Marshal.IsComObject(comObject))
             {
-                return null;
-            }
-
-            Word.Document matchedDocument = ResolveOpenDocument(fullName);
-            if (matchedDocument != null)
-            {
-                return matchedDocument;
-            }
-
-            Word.Application app = GetApplication();
-            if (app == null)
-            {
-                return null;
+                return;
             }
 
             try
             {
-                return app.Documents.Open(fullName, ReadOnly: true, Visible: false);
+                System.Runtime.InteropServices.Marshal.ReleaseComObject(comObject);
             }
             catch
             {
-                return null;
             }
         }
 
-        private Word.Document ResolveOpenDocument(string fullName)
+        private Word.Document GetSourceDocument()
         {
-            if (string.IsNullOrWhiteSpace(fullName))
+            if (string.IsNullOrWhiteSpace(sourceDocumentFullName))
             {
-                return null;
+                return GetApplication()?.ActiveDocument;
             }
 
             Word.Application app = GetApplication();
@@ -1131,36 +1097,18 @@ namespace DocuLint
             try
             {
                 documents = app.Documents;
-                if (documents == null)
-                {
-                    return null;
-                }
-
-                int count = documents.Count;
-                for (int i = 1; i <= count; i++)
+                for (int i = 1; i <= documents.Count; i++)
                 {
                     Word.Document doc = null;
                     try
                     {
                         doc = documents[i];
-                        string currentFullName = string.Empty;
-                        try
+                        if (string.Equals(NormalizeFilePath(doc?.FullName), sourceDocumentFullName, StringComparison.OrdinalIgnoreCase))
                         {
-                            currentFullName = doc?.FullName ?? string.Empty;
+                            matchedDocument = doc;
+                            doc = null;
+                            break;
                         }
-                        catch
-                        {
-                            currentFullName = string.Empty;
-                        }
-
-                        if (!string.Equals(currentFullName, fullName, StringComparison.OrdinalIgnoreCase))
-                        {
-                            continue;
-                        }
-
-                        matchedDocument = doc;
-                        doc = null;
-                        break;
                     }
                     finally
                     {
@@ -1168,80 +1116,220 @@ namespace DocuLint
                     }
                 }
             }
+            catch
+            {
+            }
             finally
             {
                 ReleaseComObject(documents);
             }
 
-            return matchedDocument;
+            if (matchedDocument != null)
+            {
+                return matchedDocument;
+            }
+
+            return GetApplication()?.ActiveDocument;
         }
 
-        private IEnumerable<DocumentGroupDocumentItem> GetActiveGroupDocuments()
+        private bool IsMappedToCurrentSource(string sourceId, string targetId)
         {
-            DocumentGroupStore store = new DocumentGroupStore();
-            DocumentGroupCatalog catalog = store.Load();
-            store.RefreshDocumentMetadata(catalog);
-            DocumentGroupItem activeGroup = catalog.GetActiveGroup();
-            return activeGroup?.Documents ?? Enumerable.Empty<DocumentGroupDocumentItem>();
+            return !string.IsNullOrWhiteSpace(sourceId) &&
+                   !string.IsNullOrWhiteSpace(targetId) &&
+                   mappingsBySourceId.TryGetValue(sourceId, out RequirementTraceMapping mapping) &&
+                   mapping.TargetRequirementIds.Any(item => string.Equals(item, targetId, StringComparison.OrdinalIgnoreCase));
         }
 
-        private void EnsureDocumentOptionExists(string fullPath)
+        private bool HasMappedTargets(string sourceId)
         {
-            if (string.IsNullOrWhiteSpace(fullPath))
-            {
-                return;
-            }
-
-            if (!manuallySelectedDocumentPaths.Any(item => string.Equals(item, fullPath, StringComparison.OrdinalIgnoreCase)))
-            {
-                manuallySelectedDocumentPaths.Add(fullPath);
-            }
-
-            if (openDocumentOptions.Any(item => string.Equals(item.FullName, fullPath, StringComparison.OrdinalIgnoreCase)))
-            {
-                return;
-            }
-
-            openDocumentOptions.Add(new RequirementTrackingDocumentOption
-            {
-                FullName = fullPath,
-                DisplayName = Path.GetFileName(fullPath)
-            });
+            return !string.IsNullOrWhiteSpace(sourceId) &&
+                   mappingsBySourceId.TryGetValue(sourceId, out RequirementTraceMapping mapping) &&
+                   mapping.TargetRequirementIds.Any(item => !string.IsNullOrWhiteSpace(item));
         }
 
-        private void SelectDocumentByFullName(ComboBox comboBox, string fullPath)
+        private bool IsTargetMappedToAnySource(string targetId)
         {
-            if (comboBox == null || string.IsNullOrWhiteSpace(fullPath))
+            return !string.IsNullOrWhiteSpace(targetId) &&
+                   mappingsBySourceId.Values.Any(mapping => mapping.TargetRequirementIds.Any(item => string.Equals(item, targetId, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        private void UpdateTitlesAndStatus()
+        {
+            int sourceCount = currentSourceViewItems.Count;
+            List<RequirementItem> visibleTargets = GetVisibleTargets().ToList();
+            int targetCount = visibleTargets.Count;
+            bool compact = IsCompactView();
+            int selectedIndex = selectedSource == null
+                ? 0
+                : currentSourceViewItems.FindIndex(item => string.Equals(item.Id, selectedSource.Id, StringComparison.OrdinalIgnoreCase)) + 1;
+            string selectedText = selectedIndex > 0 ? $"，当前 {selectedIndex}/{sourceCount}" : string.Empty;
+            string sourceTitle = GetTemplateSideDisplayName(true);
+            string targetTitle = GetTemplateSideDisplayName(false);
+
+            lblSourceTitle.Text = string.IsNullOrWhiteSpace(sourceSnapshot?.DisplayName)
+                ? $"当前文档需求：{sourceTitle}（{sourceCount}，已映射 {mappingsBySourceId.Count}{selectedText}）"
+                : $"当前文档需求：{sourceSnapshot.DisplayName} - {sourceTitle}（{sourceCount}，已映射 {mappingsBySourceId.Count}{selectedText}）";
+            lblTargetTitle.Text = string.IsNullOrWhiteSpace(targetSnapshot?.DisplayName)
+                ? $"互追文档需求：{targetTitle}（{targetCount}）"
+                : $"互追文档需求：{targetSnapshot.DisplayName} - {targetTitle}（{targetCount}）";
+            lblRecommendedTitle.Text = $"候选推荐（最多 20 条，当前 {gridTargetRecommended.Rows.Count} 条）";
+            lblAllTargetTitle.Text = compact
+                ? $"全部目标需求（隐藏，{targetCount}）"
+                : $"详细需求列表（{gridTargetAll.Rows.Count} 条）";
+        }
+
+        private Word.Application GetApplication()
+        {
+            return applicationAccessor?.Invoke();
+        }
+
+        private void ClearAllGrids()
+        {
+            gridSource.Rows.Clear();
+            gridTargetRecommended.Rows.Clear();
+            gridTargetAll.Rows.Clear();
+            sourceSnapshot = null;
+            targetSnapshot = null;
+            sourceDocumentFullName = null;
+            mappingsBySourceId.Clear();
+            selectedSource = null;
+            selectedTargetId = null;
+            currentSourceViewItems.Clear();
+            RenderCompactSourceCards();
+            ApplyViewModeVisibility();
+        }
+
+        private static FilterMode GetFilterMode(ComboBox comboBox)
+        {
+            if (comboBox == null)
             {
-                return;
+                return FilterMode.All;
             }
 
-            for (int i = 0; i < comboBox.Items.Count; i++)
+            switch (comboBox.SelectedIndex)
             {
-                RequirementTrackingDocumentOption option = comboBox.Items[i] as RequirementTrackingDocumentOption;
-                if (option == null)
+                case 1:
+                    return FilterMode.Mapped;
+                case 2:
+                    return FilterMode.Unmapped;
+                default:
+                    return FilterMode.All;
+            }
+        }
+
+        private static HashSet<string> ExtractKeywords(string text)
+        {
+            HashSet<string> keywords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            string normalized = NormalizeKeywordText(text);
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return keywords;
+            }
+
+            foreach (string part in normalized.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (part.Length >= 2)
                 {
-                    continue;
+                    keywords.Add(part);
                 }
 
-                if (string.Equals(option.FullName, fullPath, StringComparison.OrdinalIgnoreCase))
+                if (part.Length > 3)
                 {
-                    comboBox.SelectedIndex = i;
-                    return;
+                    for (int i = 0; i + 2 <= part.Length && keywords.Count < 40; i++)
+                    {
+                        keywords.Add(part.Substring(i, 2));
+                    }
                 }
             }
+
+            return keywords;
         }
 
-        private static string NormalizeFilePath(string filePath)
+        private static int GetNameScore(HashSet<string> keywords, string targetName)
+        {
+            string target = NormalizeKeywordText(targetName);
+            if (string.IsNullOrWhiteSpace(target))
+            {
+                return 0;
+            }
+
+            int score = 0;
+            foreach (string keyword in keywords)
+            {
+                if (target.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    score += keyword.Length > 2 ? 2 : 1;
+                }
+            }
+
+            return score;
+        }
+
+        private static string NormalizeKeywordText(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return string.Empty;
+            }
+
+            StringBuilder builder = new StringBuilder(text.Length);
+            foreach (char c in text.Trim())
+            {
+                builder.Append(char.IsLetterOrDigit(c) ? c : ' ');
+            }
+
+            return builder.ToString();
+        }
+
+        private static string GetDocumentTypeDisplayName(RequirementTrackingDocumentSnapshot snapshot)
+        {
+            string name = ((snapshot?.DisplayName ?? string.Empty) + " " + (snapshot?.FullName ?? string.Empty)).Trim();
+            if (ContainsAny(name, "软件需求规格说明", "需求规格说明", "SRS"))
+            {
+                return "软件需求规格说明";
+            }
+
+            if (ContainsAny(name, "软件设计说明", "软件设计描述", "SDD", "SDS"))
+            {
+                return "软件设计说明";
+            }
+
+            if (ContainsAny(name, "软件研制任务书", "研制任务书"))
+            {
+                return "软件研制任务书";
+            }
+
+            if (ContainsAny(name, "软件测试说明", "软件测试描述", "测试说明", "STD", "STS"))
+            {
+                return "软件测试说明";
+            }
+
+            if (ContainsAny(name, "系统规格说明", "系统/子系统规格说明", "系统子系统规格说明", "SSS"))
+            {
+                return "系统规格说明";
+            }
+
+            return string.IsNullOrWhiteSpace(snapshot?.DisplayName)
+                ? "追踪文档"
+                : Path.GetFileNameWithoutExtension(snapshot.DisplayName);
+        }
+
+        private static bool ContainsAny(string text, params string[] tokens)
+        {
+            if (string.IsNullOrWhiteSpace(text) || tokens == null)
+            {
+                return false;
+            }
+
+            return tokens.Any(token => !string.IsNullOrWhiteSpace(token) &&
+                                       text.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        private static string NormalizeFilePath(string path)
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(filePath))
-                {
-                    return string.Empty;
-                }
-
-                return Path.GetFullPath(filePath.Trim());
+                return string.IsNullOrWhiteSpace(path) ? string.Empty : Path.GetFullPath(path.Trim());
             }
             catch
             {
@@ -1249,139 +1337,370 @@ namespace DocuLint
             }
         }
 
-        private static Label CreateFieldLabel(string text)
+        private static int FindRowByRequirementId(DataGridView grid, string id)
+        {
+            if (grid == null || string.IsNullOrWhiteSpace(id))
+            {
+                return -1;
+            }
+
+            for (int i = 0; i < grid.Rows.Count; i++)
+            {
+                RequirementItem item = grid.Rows[i].Tag as RequirementItem;
+                if (string.Equals(item?.Id, id, StringComparison.OrdinalIgnoreCase))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private static void BindSourceCard(Label label, string caption, RequirementItem item)
+        {
+            label.Tag = item;
+            label.Text = item == null
+                ? $"{caption}：\r\n无"
+                : $"{caption}：\r\n{item.DisplayText}";
+            label.Enabled = item != null;
+        }
+
+        private static Label CreatePaneTitle(string text)
+        {
+            return new Label
+            {
+                Dock = DockStyle.Fill,
+                Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold, GraphicsUnit.Point),
+                Text = text,
+                TextAlign = ContentAlignment.MiddleLeft,
+                AutoEllipsis = true
+            };
+        }
+
+        private static Label CreateToolbarLabel(string text)
+        {
+            return new Label
+            {
+                AutoSize = true,
+                Height = 28,
+                Text = text,
+                TextAlign = ContentAlignment.MiddleRight,
+                Margin = new Padding(0, 4, 4, 0),
+                Padding = new Padding(0, 5, 0, 0)
+            };
+        }
+
+        private static Label CreateSourceCardLabel(bool current = false)
         {
             return new Label
             {
                 Dock = DockStyle.Fill,
                 AutoEllipsis = false,
-                Font = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Regular, GraphicsUnit.Point),
-                Text = text,
-                TextAlign = ContentAlignment.MiddleLeft
+                BorderStyle = BorderStyle.FixedSingle,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(12, 9, 12, 9),
+                Margin = new Padding(0, 0, 0, 8),
+                Cursor = Cursors.Hand,
+                BackColor = current ? Color.FromArgb(225, 239, 255) : Color.White,
+                ForeColor = current ? Color.FromArgb(24, 82, 168) : Color.FromArgb(43, 57, 76),
+                Font = new Font("Microsoft YaHei UI", current ? 10F : 9F, current ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Point)
             };
         }
 
-        private static ComboBox CreateDocumentComboBox()
-        {
-            return new ComboBox
-            {
-                Dock = DockStyle.Fill,
-                Font = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Regular, GraphicsUnit.Point),
-                DropDownStyle = ComboBoxStyle.DropDownList
-            };
-        }
-
-        private static Button CreateBrowseButton()
+        private static Button CreatePrimaryButton(string text)
         {
             Button button = new Button
             {
                 Dock = DockStyle.Fill,
-                Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point),
-                Text = "浏览..."
-            };
-            ApplySecondaryButtonStyle(button);
-            return button;
-        }
-
-        private static Button CreateLoadButton(string text)
-        {
-            Button button = new Button
-            {
-                Dock = DockStyle.Fill,
-                Font = new Font("Microsoft YaHei", 10F, FontStyle.Bold, GraphicsUnit.Point),
                 Text = text,
-                Height = 38,
-                Margin = new Padding(3, 3, 3, 1)
+                Height = 36,
+                Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold, GraphicsUnit.Point),
+                Margin = new Padding(4, 6, 0, 6),
+                UseVisualStyleBackColor = false,
+                BackColor = Color.FromArgb(42, 122, 226),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand
             };
-            ApplyPrimaryButtonStyle(button);
-            return button;
-        }
-
-        private static void ApplyPrimaryButtonStyle(Button button)
-        {
-            if (button == null)
-            {
-                return;
-            }
-
-            button.UseVisualStyleBackColor = false;
-            button.BackColor = Color.FromArgb(42, 122, 226);
-            button.ForeColor = Color.White;
-            button.FlatStyle = FlatStyle.Flat;
             button.FlatAppearance.BorderSize = 0;
             button.FlatAppearance.MouseOverBackColor = Color.FromArgb(58, 136, 236);
             button.FlatAppearance.MouseDownBackColor = Color.FromArgb(33, 105, 199);
-            button.Cursor = Cursors.Hand;
+            return button;
         }
 
-        private static void ApplySecondaryButtonStyle(Button button)
+        private static Button CreateSmallButton(string text)
         {
-            if (button == null)
+            Button button = new Button
             {
-                return;
-            }
-
-            button.UseVisualStyleBackColor = false;
-            button.BackColor = Color.FromArgb(235, 243, 255);
-            button.ForeColor = Color.FromArgb(36, 89, 171);
-            button.FlatStyle = FlatStyle.Flat;
+                AutoSize = false,
+                Width = text.Length > 4 ? 136 : 78,
+                Height = 30,
+                Text = text,
+                Margin = new Padding(6, 4, 0, 0),
+                UseVisualStyleBackColor = false,
+                BackColor = Color.FromArgb(235, 243, 255),
+                ForeColor = Color.FromArgb(36, 89, 171),
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand
+            };
             button.FlatAppearance.BorderColor = Color.FromArgb(176, 203, 240);
             button.FlatAppearance.BorderSize = 1;
             button.FlatAppearance.MouseOverBackColor = Color.FromArgb(223, 236, 255);
             button.FlatAppearance.MouseDownBackColor = Color.FromArgb(209, 227, 253);
-            button.Cursor = Cursors.Hand;
+            return button;
         }
 
-        private static Panel CreateBorderPanel()
+        private static ComboBox CreateComboBox(params string[] items)
         {
-            return new Panel
+            ComboBox comboBox = new ComboBox
+            {
+                Width = 88,
+                Height = 28,
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Margin = new Padding(0, 4, 6, 0)
+            };
+            comboBox.Items.AddRange(items.Cast<object>().ToArray());
+            comboBox.SelectedIndex = 0;
+            return comboBox;
+        }
+
+        private static Control WrapPane(Control content)
+        {
+            Panel panel = new Panel
             {
                 Dock = DockStyle.Fill,
                 BorderStyle = BorderStyle.FixedSingle,
-                Padding = new Padding(8)
+                Margin = new Padding(0, 0, 8, 0)
             };
+            panel.Controls.Add(content);
+            return panel;
         }
 
-        private static void ReleaseComObject(object comObject)
+        private static DataGridView CreateRequirementGrid(bool includeCheckColumn)
         {
-            if (comObject == null || !Marshal.IsComObject(comObject))
+            DataGridView grid = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                AllowUserToResizeRows = false,
+                AutoGenerateColumns = false,
+                BackgroundColor = Color.White,
+                BorderStyle = BorderStyle.None,
+                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
+                ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None,
+                ColumnHeadersHeight = 32,
+                EnableHeadersVisualStyles = false,
+                GridColor = Color.FromArgb(229, 234, 242),
+                MultiSelect = false,
+                ReadOnly = !includeCheckColumn,
+                RowHeadersVisible = false,
+                RowTemplate = { Height = 30 },
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect
+            };
+
+            grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(245, 247, 250);
+            grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(43, 57, 76);
+            grid.ColumnHeadersDefaultCellStyle.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold, GraphicsUnit.Point);
+            grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            grid.DefaultCellStyle.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
+            grid.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(225, 239, 255);
+            grid.DefaultCellStyle.SelectionForeColor = Color.Black;
+            EnableDoubleBuffering(grid);
+
+            if (includeCheckColumn)
+            {
+                grid.Columns.Add(new DataGridViewCheckBoxColumn
+                {
+                    Name = "Mapped",
+                    HeaderText = "追踪",
+                    Width = 54,
+                    AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+                    ReadOnly = false
+                });
+            }
+
+            grid.Columns.Add(CreateRequirementTextColumn("Id", "需求标识", 30f));
+            grid.Columns.Add(CreateRequirementTextColumn("Name", "需求名称", 50f));
+            grid.Columns.Add(CreateRequirementTextColumn("SectionNumber", "章节号", 20f));
+            return grid;
+        }
+
+        private void RestoreTargetSelection(DataGridView grid)
+        {
+            if (grid == null || grid.Rows.Count == 0 || string.IsNullOrWhiteSpace(selectedTargetId))
+            {
+                return;
+            }
+
+            int rowIndex = FindRowByRequirementId(grid, selectedTargetId);
+            if (rowIndex < 0)
             {
                 return;
             }
 
             try
             {
-                Marshal.ReleaseComObject(comObject);
+                grid.ClearSelection();
+                grid.Rows[rowIndex].Selected = true;
+                if (grid.Rows[rowIndex].Cells.Count > 0)
+                {
+                    grid.CurrentCell = grid.Rows[rowIndex].Cells[0];
+                }
             }
             catch
             {
             }
         }
 
-        private sealed class SourceRequirementListEntry
+        private static DataGridViewTextBoxColumn CreateRequirementTextColumn(string name, string headerText, float fillWeight)
         {
-            internal SourceRequirementListEntry(RequirementItem requirement)
+            return new DataGridViewTextBoxColumn
             {
-                Requirement = requirement;
+                Name = name,
+                HeaderText = headerText,
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                FillWeight = fillWeight,
+                ReadOnly = true,
+                DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleCenter },
+                SortMode = DataGridViewColumnSortMode.NotSortable
+            };
+        }
+
+        private static Panel CreateTargetSectionPanel(Control title, Control content)
+        {
+            Panel panel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0)
+            };
+
+            TableLayoutPanel layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 2,
+                Margin = new Padding(0)
+            };
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            layout.Controls.Add(title, 0, 0);
+            layout.Controls.Add(content, 0, 1);
+            panel.Controls.Add(layout);
+            return panel;
+        }
+
+        private bool IsCompactView()
+        {
+            return cmbSourceViewMode == null || cmbSourceViewMode.SelectedIndex != 1;
+        }
+
+        private RequirementTraceTemplate GetCurrentTraceTemplate()
+        {
+            if (cmbTraceTemplate == null)
+            {
+                return RequirementTraceTemplate.SrsToSds;
             }
 
-            internal RequirementItem Requirement { get; }
-
-            public override string ToString()
+            switch (cmbTraceTemplate.SelectedIndex)
             {
-                if (Requirement == null) return string.Empty;
-                return Requirement.DisplayText;
+                case 1:
+                    return RequirementTraceTemplate.SdsToSrs;
+                case 2:
+                    return RequirementTraceTemplate.SdsToSdd;
+                case 3:
+                    return RequirementTraceTemplate.SddToSds;
+                default:
+                    return RequirementTraceTemplate.SrsToSds;
             }
         }
 
-        private sealed class NativeWindowWrapper : IWin32Window
+        private void OnTraceTemplateChanged()
         {
-            internal NativeWindowWrapper(IntPtr handle)
-            {
-                Handle = handle;
-            }
-
-            public IntPtr Handle { get; }
+            LoadTraceMappingsFromSourceDocument();
+            RefreshViewPreservingSelection();
         }
+
+        private bool MatchesSourceTemplate(RequirementItem item)
+        {
+            return MatchesTemplateRequirement(item?.Id, GetSourceTemplatePrefix());
+        }
+
+        private bool MatchesTargetTemplate(RequirementItem item)
+        {
+            return MatchesTemplateRequirement(item?.Id, GetTargetTemplatePrefix());
+        }
+
+        private static bool MatchesTemplateRequirement(string id, string prefix)
+        {
+            return RequirementItem.ContainsRequirementPrefix(id, prefix);
+        }
+
+        private string GetSourceTemplatePrefix()
+        {
+            switch (GetCurrentTraceTemplate())
+            {
+                case RequirementTraceTemplate.SdsToSrs:
+                case RequirementTraceTemplate.SdsToSdd:
+                    return "SDS";
+                case RequirementTraceTemplate.SddToSds:
+                    return "SDD";
+                default:
+                    return "SRS";
+            }
+        }
+
+        private string GetTargetTemplatePrefix()
+        {
+            switch (GetCurrentTraceTemplate())
+            {
+                case RequirementTraceTemplate.SrsToSds:
+                case RequirementTraceTemplate.SddToSds:
+                    return "SDS";
+                case RequirementTraceTemplate.SdsToSrs:
+                    return "SRS";
+                default:
+                    return "SDD";
+            }
+        }
+
+        private string GetTemplateSideDisplayName(bool sourceSide)
+        {
+            switch (GetCurrentTraceTemplate())
+            {
+                case RequirementTraceTemplate.SrsToSds:
+                    return sourceSide ? "软件需求规格说明" : "软件概要设计说明";
+                case RequirementTraceTemplate.SdsToSrs:
+                    return sourceSide ? "软件概要设计说明" : "软件需求规格说明";
+                case RequirementTraceTemplate.SdsToSdd:
+                    return sourceSide ? "软件概要设计说明" : "软件详细设计说明";
+                case RequirementTraceTemplate.SddToSds:
+                    return sourceSide ? "软件详细设计说明" : "软件概要设计说明";
+                default:
+                    return sourceSide ? "当前文档" : "互追文档";
+            }
+        }
+
+        private void WireTargetGrid(DataGridView grid)
+        {
+            grid.CurrentCellDirtyStateChanged += GridTarget_CurrentCellDirtyStateChanged;
+            grid.CellValueChanged += GridTarget_CellValueChanged;
+            grid.SelectionChanged += GridTarget_SelectionChanged;
+        }
+
+        private static void EnableDoubleBuffering(DataGridView grid)
+        {
+            try
+            {
+                typeof(DataGridView)
+                    .GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                    ?.SetValue(grid, true, null);
+            }
+            catch
+            {
+            }
+        }
+
     }
 }

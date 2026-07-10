@@ -115,14 +115,6 @@ namespace DocuLint
             {
                 Word.Range target = doc.Range(safeStart, safeStart);
                 target.Select();
-
-                try
-                {
-                    app.ActiveWindow.ScrollIntoView(target, true);
-                }
-                catch
-                {
-                }
             }
             catch
             {

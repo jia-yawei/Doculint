@@ -1,16 +1,17 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 
-[assembly: AssemblyTitle("ÎÄµµ²»¼Ó°à.Host.Abstractions")]
+[assembly: AssemblyTitle("æå¿«ç‚¹.Host.Abstractions")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
-[assembly: AssemblyProduct("ÎÄµµ²»¼Ó°à")]
+[assembly: AssemblyProduct("æå¿«ç‚¹")]
 [assembly: AssemblyCopyright("Copyright 2026")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
 [assembly: ComVisible(false)]
 [assembly: Guid("E4E95F1D-9A80-4E0A-8351-128FB2F6F5F4")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("0.0.1.0")]
+[assembly: AssemblyFileVersion("0.0.1.0")]
+
