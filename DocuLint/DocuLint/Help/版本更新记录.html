@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>版本更新记录</title>
+  <style>
+    :root {
+      --ink: #1f2933;
+      --muted: #667085;
+      --line: #d8dee8;
+      --soft: #f6f8fb;
+      --brand: #1f6f8b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #fff;
+      color: var(--ink);
+      font-family: "Microsoft YaHei UI", "Microsoft YaHei", SimSun, sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+    }
+    header {
+      padding: 30px 42px 24px;
+      color: #fff;
+      background: linear-gradient(135deg, #155674, var(--brand));
+    }
+    header h1 { margin: 0 0 6px; font-size: 28px; }
+    header p { margin: 0; opacity: .92; }
+    main {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      gap: 28px;
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 28px 34px 48px;
+    }
+    nav {
+      position: sticky;
+      top: 16px;
+      align-self: start;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+      background: var(--soft);
+    }
+    nav strong { display: block; margin-bottom: 8px; }
+    nav a {
+      display: block;
+      padding: 7px 8px;
+      color: #155674;
+      text-decoration: none;
+      border-radius: 6px;
+    }
+    nav a:hover { background: #e8f2f7; }
+    section {
+      margin-bottom: 18px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      overflow: hidden;
+    }
+    h2 {
+      margin: 0;
+      padding: 13px 18px;
+      background: var(--soft);
+      border-bottom: 1px solid var(--line);
+      font-size: 19px;
+    }
+    ul { margin: 12px 0 16px; padding: 0 24px 0 42px; }
+    li { margin: 5px 0; }
+    .meta { color: var(--muted); font-size: 14px; }
+    @media (max-width: 760px) {
+      main { display: block; padding: 20px 16px 40px; }
+      nav { position: static; margin-bottom: 18px; }
+      header { padding: 26px 20px; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h1>搞快点插件版本更新记录</h1>
+  <p>作者：软件三室。当前版本：0.0.1.2。</p>
+</header>
+<main>
+  <nav>
+    <strong>目录</strong>
+    <a href="#v0012">0.0.1.2</a>
+    <a href="#v0011">0.0.1.1</a>
+  </nav>
+  <div>
+    <section id="v0012">
+      <h2>0.0.1.2</h2>
+      <ul>
+        <li>增加了对不同分辨率和较大显示缩放环境的适应性优化。</li>
+        <li>优化了 Word 启动阶段和样式下拉框的加载逻辑，减少不必要的启动扫描。</li>
+        <li>修复了部分界面在高 DPI 或字体较大时显示拥挤、截断的问题。</li>
+      </ul>
+    </section>
+    <section id="v0011">
+      <h2>0.0.1.1</h2>
+      <ul>
+        <li>增加了软件专用的功能。</li>
+        <li>更新了样式管理中的逻辑。</li>
+        <li>修复了部分已知问题。</li>
+        <li>提高了插件执行效率。</li>
+      </ul>
+    </section>
+    <p class="meta">后续版本只记录概要内容，详细功能说明请查看“打开帮助文档”。</p>
+  </div>
+</main>
+</body>
+</html>

@@ -23,6 +23,10 @@ namespace DocuLint
             {
                 components.Dispose();
             }
+            if (disposing)
+            {
+                DisposeRuntimeResources();
+            }
             base.Dispose(disposing);
         }
 
@@ -604,7 +608,7 @@ namespace DocuLint
             // btnHelpVersion
             // 
             this.btnHelpVersion.Enabled = false;
-            this.btnHelpVersion.Label = "版本号：0.0.1.0";
+            this.btnHelpVersion.Label = "版本号：0.0.1.2";
             this.btnHelpVersion.Name = "btnHelpVersion";
             this.btnHelpVersion.OfficeImageId = "Info";
             this.btnHelpVersion.ShowImage = true;
@@ -720,4 +724,3 @@ namespace DocuLint
         }
     }
 }
-

@@ -5,14 +5,15 @@
   <title>搞快点插件帮助文档</title>
   <style>
     :root {
-      --ink: #1f2933;
-      --muted: #5b6572;
-      --line: #d8dee8;
-      --soft: #f5f7fb;
+      --ink: #202124;
+      --muted: #5f6368;
+      --line: #dadce0;
+      --soft: #f8fafd;
       --brand: #1f6f8b;
-      --brand-dark: #155674;
+      --brand-dark: #174f66;
       --warn: #8a5a00;
       --warn-bg: #fff7df;
+      --ok-bg: #eef7f1;
     }
     * { box-sizing: border-box; }
     body {
@@ -29,14 +30,14 @@
       background: linear-gradient(135deg, var(--brand-dark), var(--brand));
     }
     header h1 { margin: 0 0 8px; font-size: 30px; font-weight: 700; }
-    header p { margin: 0; opacity: .92; }
+    header p { margin: 0; opacity: .94; }
     main {
       display: grid;
-      grid-template-columns: 250px minmax(0, 1fr);
+      grid-template-columns: 260px minmax(0, 1fr);
       gap: 30px;
-      max-width: 1260px;
+      max-width: 1280px;
       margin: 0 auto;
-      padding: 28px 34px 56px;
+      padding: 28px 34px 58px;
     }
     nav {
       position: sticky;
@@ -47,6 +48,7 @@
       padding: 16px;
       background: var(--soft);
     }
+    nav strong { display: block; margin-bottom: 8px; }
     nav a {
       display: block;
       padding: 6px 8px;
@@ -56,7 +58,7 @@
     }
     nav a:hover { background: #e8f2f7; }
     section {
-      margin-bottom: 28px;
+      margin-bottom: 26px;
       border: 1px solid var(--line);
       border-radius: 14px;
       padding: 22px 26px;
@@ -65,6 +67,7 @@
     h2 { margin: 0 0 14px; font-size: 23px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
     h3 { margin: 20px 0 8px; font-size: 18px; }
     h4 { margin: 16px 0 6px; font-size: 16px; }
+    p { margin: 8px 0; }
     ul, ol { padding-left: 24px; }
     li { margin: 4px 0; }
     code {
@@ -75,7 +78,7 @@
     }
     table { width: 100%; border-collapse: collapse; margin: 12px 0 4px; }
     th, td { border: 1px solid var(--line); padding: 8px 10px; vertical-align: top; }
-    th { background: #eef4f8; text-align: left; }
+    th { background: #eef4f8; text-align: left; white-space: nowrap; }
     .note {
       border-left: 4px solid var(--brand);
       background: #eef7fb;
@@ -89,6 +92,12 @@
       margin: 12px 0;
       color: #4a3900;
     }
+    .ok {
+      border-left: 4px solid #3c7a44;
+      background: var(--ok-bg);
+      padding: 10px 14px;
+      margin: 12px 0;
+    }
     .meta { color: var(--muted); font-size: 14px; }
     @media (max-width: 900px) {
       main { display: block; padding: 20px 16px 40px; }
@@ -100,276 +109,312 @@
 <body>
 <header>
   <h1>搞快点 Word 插件帮助文档</h1>
-  <p>版本号：0.0.1.0。作者：软件三室。面向软件文档、GJB 文档、需求规格说明、设计说明等长文档编写场景。</p>
+  <p>版本号：0.0.1.2。作者：软件三室。用于提高 Word 长文档、软件文档和规范化文档的编写、检查、题注、样式和需求追踪效率。</p>
 </header>
 <main>
   <nav>
     <strong>目录</strong>
-    <a href="#install">安装与启用</a>
-    <a href="#workflow">推荐写作流程</a>
-    <a href="#document">文档管理</a>
-    <a href="#batch">批量处理</a>
-    <a href="#styles">样式管理</a>
-    <a href="#quick">快速工具</a>
-    <a href="#caption">题注与引用</a>
-    <a href="#panes">窗格显示</a>
-    <a href="#check">文档检查</a>
-    <a href="#software">软件专用</a>
-    <a href="#tracking">需求提取与追踪</a>
+    <a href="#install">安装</a>
+    <a href="#uninstall">卸载</a>
+    <a href="#intro">插件介绍</a>
+    <a href="#tips">基础使用提示</a>
+    <a href="#features">全部功能</a>
+    <a href="#scenes">场景用法</a>
+    <a href="#workflow">建议工作流</a>
     <a href="#trouble">常见问题</a>
+    <a href="#thanks">感谢与反馈</a>
   </nav>
+
   <div>
     <section id="install">
-      <h2>安装与启用</h2>
-      <h3>适用环境</h3>
+      <h2>安装</h2>
+      <h3>运行环境</h3>
       <ul>
         <li>Microsoft Word 桌面版。</li>
-        <li>.NET Framework 4.7.2。</li>
+        <li>.NET Framework 4.7.2 或更高版本，已安装 .NET Framework 4.8 的电脑满足要求。</li>
         <li>Microsoft Visual Studio 2010 Tools for Office Runtime。</li>
-        <li>单机内网电脑可以离线安装，但安装包中需要包含上述运行环境或提前安装。</li>
+        <li>Win7 内网电脑如果无法验证安装包发布者，通常需要先补 SHA-2 和根证书相关系统更新。</li>
       </ul>
       <h3>安装步骤</h3>
       <ol>
         <li>关闭所有 Word 窗口。</li>
         <li>运行发布包中的 <code>setup.exe</code>。</li>
-        <li>如果提示安装 .NET Framework 或 VSTO Runtime，按提示安装。</li>
-        <li>如果提示证书或发布者不受信任，确认来源是内部发布包后继续安装。</li>
-        <li>重新打开 Word，功能区中应出现 <strong>搞快点</strong> 选项卡。</li>
+        <li>如果提示安装 .NET Framework 或 VSTO Runtime，按提示完成安装。</li>
+        <li>重新打开 Word，功能区中出现 <strong>搞快点</strong> 选项卡即表示加载成功。</li>
+        <li>点击 <strong>关于 - 版本号</strong> 可以查看当前版本和更新记录。</li>
       </ol>
-      <h3>重新安装或升级</h3>
+      <div class="warn">安装或升级前建议关闭 Word。对重要文档执行批量处理前，请先备份原文件。</div>
+    </section>
+
+    <section id="uninstall">
+      <h2>卸载</h2>
       <ol>
-        <li>关闭 Word。</li>
-        <li>在“控制面板 - 程序和功能”中卸载旧版本，或直接运行新版本安装包覆盖安装。</li>
-        <li>重新打开 Word 后，在插件最右侧 <strong>关于 - 版本号</strong> 中确认版本。</li>
+        <li>关闭所有 Word 窗口。</li>
+        <li>打开 Windows <strong>控制面板 - 程序和功能</strong>。</li>
+        <li>找到 <strong>搞快点</strong> 或 DocuLint 相关项。</li>
+        <li>点击卸载并按提示完成。</li>
+        <li>重新打开 Word，确认功能区中不再显示 <strong>搞快点</strong> 选项卡。</li>
       </ol>
-      <div class="warn">如果 Word 启动后没有出现插件，先到 <strong>文件 - 选项 - 加载项</strong> 查看是否被禁用。若在“禁用的项目”中看到本插件，需要重新启用后重启 Word。</div>
+      <h3>插件被禁用时的处理</h3>
+      <ol>
+        <li>打开 Word，进入 <strong>文件 - 选项 - 加载项</strong>。</li>
+        <li>在底部“管理”中选择 <strong>禁用的项目</strong>，点击“转到”。</li>
+        <li>如果看到本插件，选择后点击启用。</li>
+        <li>再到 <strong>COM 加载项</strong> 中确认插件已勾选。</li>
+        <li>重启 Word。</li>
+      </ol>
+    </section>
+
+    <section id="intro">
+      <h2>插件介绍</h2>
+      <p><strong>搞快点</strong> 是一个 Word VSTO 插件，重点解决长文档编写时重复、易错、低效的问题。</p>
+      <p>它主要面向以下场景：</p>
+      <ul>
+        <li>软件需求规格说明、软件设计说明、测试说明、研制总结等软件文档。</li>
+        <li>需要大量图片题注、表格题注、交叉引用和续表的技术文档。</li>
+        <li>需要统一样式、大纲级别、多级列表章节号的规范化文档。</li>
+        <li>需要检查章节标题、题注连续性、列表连续性、未更新域和样式一致性的长文档。</li>
+        <li>需要从需求文档和设计文档中提取需求标识，并建立追踪关系的文档。</li>
+      </ul>
+      <div class="note">插件尽量复用 Word 原生能力，例如格式刷、编号列表、拆分表格、字段和交叉引用。这样可以减少重复造轮子，也更符合 Word 用户已有操作习惯。</div>
+    </section>
+
+    <section id="tips">
+      <h2>基础使用提示</h2>
+      <ul>
+        <li>鼠标悬浮在按钮上，Word 会显示按钮名称和简要提示。部分功能为了提高启动速度，只保留了必要提示。</li>
+        <li>涉及批量替换、清理手工编号、清理空白页、更新章节号等操作时，建议先保存或备份文档。</li>
+        <li>右侧窗格中的列表通常支持单击跳转到文档对应位置。</li>
+        <li>软件专用分组只在文件名包含“软件”时可用，用于减少普通文档误操作。</li>
+        <li>如果某个功能执行时间较长，可以按 Esc 请求停止后续执行；是否立即停止取决于当前功能是否已接入可取消检查点。</li>
+      </ul>
+    </section>
+
+    <section id="features">
+      <h2>全部功能</h2>
+
+      <h3>文档管理</h3>
+      <table>
+        <thead><tr><th>功能</th><th>说明</th><th>使用建议</th></tr></thead>
+        <tbody>
+          <tr><td>切换窗口</td><td>类似 Word 原生“视图 - 切换窗口”，用于在已打开文档之间切换。</td><td>适合同时编辑需求、设计、测试等多个文档。</td></tr>
+          <tr><td>打开所在文件夹</td><td>打开当前文档所在目录。</td><td>用于查找同目录附件、模板或输出文件。</td></tr>
+          <tr><td>保存所有文档</td><td>保存当前 Word 中已打开的所有文档。</td><td>长时间编辑或批量操作前建议执行一次。</td></tr>
+          <tr><td>关闭其他文档</td><td>关闭除当前文档外的其它文档。</td><td>减少误操作和窗口干扰。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>批量处理</h3>
+      <table>
+        <thead><tr><th>功能</th><th>说明</th><th>使用建议</th></tr></thead>
+        <tbody>
+          <tr><td>批量替换</td><td>按规则批量查找和替换文档内容。</td><td>适合替换项目名称、单位名称、版本号、固定术语。</td></tr>
+          <tr><td>格式刷</td><td>调用 Word 原生格式刷。</td><td>先选中格式来源，再点击格式刷，然后刷到目标内容。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>样式管理</h3>
+      <table>
+        <thead><tr><th>功能</th><th>说明</th><th>使用建议</th></tr></thead>
+        <tbody>
+          <tr><td>当前样式</td><td>显示当前文档样式，选择后应用到光标所在段落或选区。</td><td>用于快速套用当前文档已有样式。</td></tr>
+          <tr><td>大纲级别</td><td>设置当前段落为 1 至 9 级大纲或正文。</td><td>导航窗格、目录和章节号通常依赖大纲级别。</td></tr>
+          <tr><td>创建自定义样式</td><td>创建通用 1 级标题到通用 9 级标题和正文样式。</td><td>只有勾选“是否创建”的样式才会写入文档。</td></tr>
+          <tr><td>样式绑定</td><td>配置大纲级别、样式、多级列表的绑定关系。</td><td>先绑定，再更新章节号，避免章节号乱序。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>快速工具</h3>
+      <table>
+        <thead><tr><th>功能</th><th>说明</th><th>使用建议</th></tr></thead>
+        <tbody>
+          <tr><td>选择 - 下个跨页表格</td><td>从当前光标位置查找并选中下一个跨页表格。</td><td>用于逐个处理跨页表格。</td></tr>
+          <tr><td>更新目录</td><td>更新目录内容和页码。</td><td>最终交付前执行，目录字体会统一为宋体小四。</td></tr>
+          <tr><td>更新总页码</td><td>刷新文档中的总页码字段。</td><td>页数变化后执行。</td></tr>
+          <tr><td>更新题注</td><td>刷新图片题注、表格题注和相关引用。</td><td>新增或删除题注后执行。</td></tr>
+          <tr><td>更新所选章节号</td><td>更新光标所在段落或选区内标题章节号。</td><td>用于局部刷新，避免每次处理全篇。</td></tr>
+          <tr><td>插入总页码</td><td>在光标位置插入总页码字段。</td><td>适合页眉、页脚或正文说明。</td></tr>
+          <tr><td>插入编号</td><td>调用 Word 原生编号列表。</td><td>回车后自动继续下一编号。</td></tr>
+          <tr><td>黑体小四 / 宋体小四</td><td>快速设置选区字体和字号。</td><td>适合局部排版修正。</td></tr>
+          <tr><td>页面间空白</td><td>显示或隐藏页面之间的空白。</td><td>用于快速切换阅读和排版视图。</td></tr>
+          <tr><td>图片单倍行距</td><td>将图片所在段落设置为单倍行距。</td><td>用于修复图片上下空白异常。</td></tr>
+          <tr><td>拆分表格</td><td>按 Word 原生拆分表格逻辑拆分，并添加续表题注。</td><td>适合跨页表格续表处理。</td></tr>
+          <tr><td>快速表格样式</td><td>规范化当前选中表格样式。</td><td>先选中表格，再点击按钮。</td></tr>
+          <tr><td>一键清除格式</td><td>将选区恢复为普通正文文本。</td><td>用于清理复制粘贴带来的混乱格式。</td></tr>
+          <tr><td>清除标题前的手工编号</td><td>删除标题段落开头手写数字编号。</td><td>执行前确认标题已设置大纲级别，避免误删标题本身数字。</td></tr>
+          <tr><td>清理空白页</td><td>删除没有文字、表格或图片的空白页面。</td><td>最终排版时使用。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>题注</h3>
+      <table>
+        <thead><tr><th>功能</th><th>说明</th><th>使用建议</th></tr></thead>
+        <tbody>
+          <tr><td>插入图片题注</td><td>插入图片题注编号字段。</td><td>用于“图 1”“图 2”等自动编号。</td></tr>
+          <tr><td>插入表格题注</td><td>插入表格题注编号字段。</td><td>用于“表 1”“表 2”等自动编号。</td></tr>
+          <tr><td>引用题注</td><td>引用上一个、下一个或自定义题注。</td><td>插入动态引用，后续通过更新题注同步编号。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>显示</h3>
+      <table>
+        <thead><tr><th>功能</th><th>说明</th><th>使用建议</th></tr></thead>
+        <tbody>
+          <tr><td>书签窗格</td><td>显示书签列表并支持跳转。</td><td>适合检查书签和定位固定位置。</td></tr>
+          <tr><td>题注窗格</td><td>显示图注和表注列表。</td><td>适合检查题注是否缺失或顺序异常。</td></tr>
+          <tr><td>标识窗格</td><td>显示文档中的需求或设计标识。</td><td>适合快速定位 SRS、SDS、SDD 等标识。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>文档检查</h3>
+      <table>
+        <thead><tr><th>检查项</th><th>说明</th><th>结果</th></tr></thead>
+        <tbody>
+          <tr><td>章节标题为空</td><td>检查大纲级别 1 至 9 的标题是否没有正文文字或只有编号。</td><td>问题显示在右侧检查结果窗格。</td></tr>
+          <tr><td>题注连续性</td><td>检查图注和表注编号是否连续。</td><td>指出具体不连续位置。</td></tr>
+          <tr><td>多级列表连续性</td><td>检查章节号是否符合标题层级。</td><td>用于发现跳号、断号和层级异常。</td></tr>
+          <tr><td>样式一致性</td><td>检查同一级大纲标题是否使用不同样式。</td><td>用于统一标题样式。</td></tr>
+          <tr><td>未更新域</td><td>定位“错误！未找到引用源”等失效引用。</td><td>单击结果可跳转到问题位置。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>软件专用</h3>
+      <table>
+        <thead><tr><th>功能</th><th>说明</th><th>使用建议</th></tr></thead>
+        <tbody>
+          <tr><td>需求提取</td><td>提取需求标识，并手动补充需求名称和章节号。</td><td>先提取标识，再逐条补需求名称。</td></tr>
+          <tr><td>需求追踪</td><td>导入互追文档并建立需求映射关系。</td><td>支持 SRS、SDS、SDD 之间的追踪模板。</td></tr>
+          <tr><td>软件文档检查</td><td>检查软件需求规格说明和软件设计说明的明确章节标题。</td><td>适合交付前检查章节完整性。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>关于</h3>
+      <table>
+        <thead><tr><th>功能</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>版本号</td><td>打开版本更新记录。</td></tr>
+          <tr><td>打开帮助文档</td><td>打开本文档。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="scenes">
+      <h2>场景用法</h2>
+
+      <h3>场景一：新建或整理一份长文档</h3>
+      <ol>
+        <li>先保存文档，避免后续批量操作无法恢复。</li>
+        <li>使用 <strong>大纲级别</strong> 设置标题层级，正文段落设置为正文。</li>
+        <li>如需统一样式，使用 <strong>创建自定义样式</strong> 创建通用标题和正文样式。</li>
+        <li>使用 <strong>样式绑定</strong> 建立大纲级别、标题样式、多级列表关系。</li>
+        <li>选中标题范围或将光标放在标题处，点击 <strong>更新 - 更新所选章节号</strong>。</li>
+        <li>插入目录后，最终点击 <strong>更新 - 更新目录</strong>。</li>
+      </ol>
+
+      <h3>场景二：处理图片、表格和交叉引用</h3>
+      <ol>
+        <li>在图片下方点击 <strong>插入图片题注</strong>。</li>
+        <li>在表格上方点击 <strong>插入表格题注</strong>。</li>
+        <li>正文需要引用图表时，点击 <strong>引用题注</strong> 或从下拉菜单选择引用方式。</li>
+        <li>新增、删除或调整图表后，点击 <strong>更新 - 更新题注</strong>。</li>
+        <li>如果有跨页表格，先把光标放在需要拆分的位置，点击 <strong>拆分表格</strong>。</li>
+        <li>使用 <strong>题注窗格</strong> 检查图注和表注是否完整。</li>
+      </ol>
+
+      <h3>场景三：交付前检查文档</h3>
+      <ol>
+        <li>勾选 <strong>章节标题为空</strong>、<strong>题注连续性</strong>、<strong>多级列表连续性</strong>、<strong>样式一致性</strong>、<strong>未更新域</strong> 中需要检查的项目。</li>
+        <li>点击 <strong>开始检查</strong>。</li>
+        <li>在右侧检查结果窗格中逐条查看问题。</li>
+        <li>单击检查结果，跳转到文档对应位置修改。</li>
+        <li>修改完成后再次检查，直到无关键问题。</li>
+      </ol>
+
+      <h3>场景四：需求提取</h3>
+      <ol>
+        <li>打开名称包含“软件”的文档。</li>
+        <li>点击 <strong>需求提取</strong> 打开右侧窗格。</li>
+        <li>点击 <strong>提取标识</strong>，插件会提取需求标识并跳转到第一个标识位置。</li>
+        <li>选中需求名称，点击浮动 <strong>添加</strong> 按钮，或开启 <strong>批量提取</strong> 后选中文字自动添加。</li>
+        <li>插件会填入需求名称和章节号，并跳转到下一个需求标识。</li>
+        <li>点击 <strong>保存</strong>，把提取结果保存到当前文档。</li>
+        <li>需要输出时，点击 <strong>导出追踪表</strong>，把表格插入光标位置。</li>
+      </ol>
+
+      <h3>场景五：需求追踪</h3>
+      <ol>
+        <li>分别在两份文档中完成需求提取并保存。</li>
+        <li>打开当前文档，点击 <strong>需求追踪</strong>。</li>
+        <li>点击 <strong>导入互追文档</strong>，导入另一份文档的需求数据。</li>
+        <li>选择追踪模板，例如 <code>SRS-&gt;SDS</code>、<code>SDS-&gt;SRS</code>、<code>SDS-&gt;SDD</code>、<code>SDD-&gt;SDS</code>。</li>
+        <li>左侧选择当前需求，右侧选择一个或多个被追踪需求。</li>
+        <li>逐条完成映射后，点击 <strong>导出追踪表</strong>。</li>
+      </ol>
+      <div class="note">一条左侧需求可以追踪多条右侧需求；没有追踪关系的左侧需求导出时右侧留空。</div>
     </section>
 
     <section id="workflow">
-      <h2>推荐写作流程</h2>
+      <h2>建议工作流</h2>
+      <h3>普通长文档</h3>
       <ol>
-        <li><strong>打开或切换文档</strong>：用“文档管理 - 切换窗口”在已打开的 Word 文档之间切换。</li>
-        <li><strong>确定标题层级</strong>：使用“样式管理”的“当前样式”和“大纲级别”设置标题和正文。</li>
-        <li><strong>建立样式绑定</strong>：需要统一章节号时，打开“样式绑定”，把大纲级别、样式、多级列表规则关联起来。</li>
-        <li><strong>更新章节号</strong>：在“快速工具 - 更新 - 更新所选章节号”中刷新光标所在段落或选区内标题编号。</li>
-        <li><strong>插入题注和引用</strong>：图片、表格旁插入题注，再用引用题注生成动态交叉引用。</li>
-        <li><strong>整理表格和图片</strong>：跨页表格拆分、快速表格样式、图片单倍行距等统一处理。</li>
-        <li><strong>检查问题</strong>：使用文档检查找章节标题为空、题注连续性、多级列表连续性、样式一致性和未更新域。</li>
-        <li><strong>需求提取与追踪</strong>：软件文档中先提取需求标识，再补充需求名称，最后在追踪控制台建立映射并导出追踪表。</li>
-        <li><strong>更新目录和域</strong>：最终交付前更新目录、总页码、题注和交叉引用。</li>
+        <li>保存文档。</li>
+        <li>设置大纲级别和样式。</li>
+        <li>插入图片题注、表格题注和交叉引用。</li>
+        <li>处理跨页表格和图片行距。</li>
+        <li>更新目录、总页码和题注。</li>
+        <li>执行文档检查。</li>
+        <li>修复问题后再次检查。</li>
       </ol>
-      <div class="note">长文档建议先保存一份副本，再执行批量替换、清理手工编号、清理空白页等不可逆程度较高的操作。Word 的撤销通常可用，但跨文档批处理不建议完全依赖撤销。</div>
-    </section>
 
-    <section id="document">
-      <h2>文档管理</h2>
-      <table>
-        <thead><tr><th>功能</th><th>使用场景</th><th>预期结果</th></tr></thead>
-        <tbody>
-          <tr><td>切换窗口</td><td>同时打开多个 Word 文档，需要快速切换。</td><td>下拉列表显示当前 Word 进程内的已打开窗口，点击后切换到对应文档。</td></tr>
-          <tr><td>打开所在文件夹</td><td>需要查看当前文档所在目录、复制文件或查找同目录附件。</td><td>用系统资源管理器打开当前文档所在文件夹。</td></tr>
-          <tr><td>保存所有文档</td><td>长时间编辑多个文档，担心未保存。</td><td>依次保存所有已打开文档。</td></tr>
-          <tr><td>关闭其他文档</td><td>只保留当前文档，减少窗口干扰。</td><td>关闭除当前文档之外的其它文档，关闭前按 Word 规则提示保存。</td></tr>
-        </tbody>
-      </table>
-    </section>
-
-    <section id="batch">
-      <h2>批量处理</h2>
-      <h3>批量替换</h3>
-      <p>用于按规则在当前文档、多个文件或文件夹内执行查找替换。</p>
-      <h4>典型场景</h4>
-      <ul>
-        <li>项目名称、单位名称、版本号批量替换。</li>
-        <li>模板文档中固定占位文字批量改成当前项目内容。</li>
-        <li>多个交付文档需要统一术语。</li>
-      </ul>
-      <h4>使用步骤</h4>
+      <h3>软件需求规格说明</h3>
       <ol>
-        <li>点击 <strong>批量替换</strong>。</li>
-        <li>选择需要处理的文件或文件夹。</li>
-        <li>录入查找内容和替换内容。</li>
-        <li>点击 <strong>开始替换</strong>。</li>
+        <li>整理标题层级，确保导航窗格能正确显示章节。</li>
+        <li>使用软件文档检查确认关键章节存在。</li>
+        <li>使用需求提取获取需求标识。</li>
+        <li>逐条补充需求名称和章节号。</li>
+        <li>保存提取结果。</li>
+        <li>需要时导出需求表或进入需求追踪。</li>
       </ol>
-      <h3>格式刷</h3>
-      <p>调用 Word 原生格式刷。先选中具有目标格式的文字或段落，点击 <strong>格式刷</strong>，再刷到目标位置。</p>
-    </section>
 
-    <section id="styles">
-      <h2>样式管理</h2>
-      <h3>当前样式</h3>
-      <p>下拉框显示当前文档可用样式，选择后应用到当前光标所在段落或选区。</p>
-      <h3>大纲级别</h3>
-      <p>用于设置当前段落的大纲级别，支持 1 级到 9 级以及正文。Word 导航窗格、目录和章节号更新主要依赖大纲级别识别标题。</p>
-      <h3>创建自定义样式</h3>
-      <p>用于创建“通用1级标题”到“通用9级标题”和“正文”等样式。配置界面中只有勾选“是否创建”的样式才会写入当前文档。</p>
-      <ul>
-        <li>可设置大纲级别、字体、字号、对齐方式、加粗和行距。</li>
-        <li>默认不强制全部创建，避免污染文档样式库。</li>
-        <li>适合新建文档或模板样式混乱时建立一套干净样式。</li>
-      </ul>
-      <h3>样式绑定</h3>
-      <p>用于配置“大纲级别、样式、多级列表”之间的关系。绑定顺序是：样式绑定到大纲级别，多级列表绑定到样式。</p>
+      <h3>软件设计说明</h3>
       <ol>
-        <li>点击 <strong>样式绑定</strong>。</li>
-        <li>为每个大纲级别选择对应样式。</li>
-        <li>选择多级列表样式，例如 <code>1</code>、<code>1.1</code>、<code>1.1.1</code> 或带点格式。</li>
-        <li>设置编号和标题之间的间隔。</li>
-        <li>确认后再执行 <strong>更新所选章节号</strong>。</li>
+        <li>先完成章节和样式整理。</li>
+        <li>提取 SDS、SDD 等设计标识。</li>
+        <li>导入需求规格说明中的需求提取结果。</li>
+        <li>按追踪模板建立 SRS、SDS、SDD 之间的映射。</li>
+        <li>导出追踪表并检查空缺项。</li>
       </ol>
-      <p><strong>预期结果：</strong>相同大纲级别使用同一套样式和编号规则，章节号按文档顺序生成。</p>
-    </section>
-
-    <section id="quick">
-      <h2>快速工具</h2>
-      <table>
-        <thead><tr><th>功能</th><th>使用场景</th><th>预期结果</th></tr></thead>
-        <tbody>
-          <tr><td>选择 - 下个跨页表格</td><td>定位后续跨页表格。</td><td>从当前光标位置开始选中下一个跨页表格。</td></tr>
-          <tr><td>更新 - 更新目录</td><td>标题或页码变化后。</td><td>更新目录内容和页码，并确保目录字体统一为宋体小四。</td></tr>
-          <tr><td>更新 - 更新总页码</td><td>页数变化后。</td><td>刷新总页码字段。</td></tr>
-          <tr><td>更新 - 更新题注</td><td>新增、删除图片或表格题注后。</td><td>同步更新图片题注、表格题注和续表引用关系。</td></tr>
-          <tr><td>更新 - 更新所选章节号</td><td>标题顺序或层级调整后。</td><td>更新光标所在标题，或当前选区内的标题章节号。</td></tr>
-          <tr><td>插入总页码</td><td>正文中需要显示总页数。</td><td>在当前位置插入总页码字段。</td></tr>
-          <tr><td>插入编号</td><td>需要普通 Word 编号列表。</td><td>调用 Word 原生编号列表，回车后自动继续下一编号。</td></tr>
-          <tr><td>黑体小四</td><td>快速设置选中文字字体。</td><td>将选区或输入点设置为黑体、小四。</td></tr>
-          <tr><td>宋体小四</td><td>快速设置选中文字字体。</td><td>将选区或输入点设置为宋体、小四。</td></tr>
-          <tr><td>页面间空白</td><td>页面视图中需要显示或隐藏页间距。</td><td>切换 Word 页面之间的空白显示。</td></tr>
-          <tr><td>图片单倍行距</td><td>图片所在段落行距异常。</td><td>将图片所在段落设置为单倍行距，减少图片排版错乱。</td></tr>
-          <tr><td>拆分表格</td><td>表格跨页，需要续表标识。</td><td>按 Word 原生拆分表格逻辑拆分，并在续表上方插入“表X（续）”。</td></tr>
-          <tr><td>快速表格样式</td><td>选中表格后统一外观。</td><td>对当前表格应用规范化表格样式。</td></tr>
-          <tr><td>清理 - 一键清除格式</td><td>选区格式混乱。</td><td>将选区段落设置为普通正文文本，并提示格式清除成功或失败。</td></tr>
-          <tr><td>清理 - 清除标题前的手工编号</td><td>标题前手写了 1、1.1 等编号。</td><td>确认后删除所有已设置大纲级别的标题段落开头手工阿拉伯数字。</td></tr>
-          <tr><td>清理 - 清理空白页</td><td>文档中存在多余空白页。</td><td>删除没有文字、表格或图片的空白页面。</td></tr>
-        </tbody>
-      </table>
-      <div class="warn">清除标题前的手工编号可能误删标题本身需要保留的数字。执行前请确认标题段落已经正确设置大纲级别，并确认标题开头数字确实是手写编号。</div>
-    </section>
-
-    <section id="caption">
-      <h2>题注与引用</h2>
-      <h3>插入图片题注</h3>
-      <p>在当前光标处插入 <strong>图X</strong>，编号使用 Word 字段，便于后续刷新和交叉引用。题注段落会设置为题注样式并居中，字体为黑体小四。</p>
-      <h3>插入表格题注</h3>
-      <p>在当前光标处插入 <strong>表X</strong>，编号同样使用 Word 字段。适合表格上方题注。</p>
-      <h3>引用题注</h3>
-      <ul>
-        <li><strong>直接点击按钮：</strong>默认引用下一个题注。</li>
-        <li><strong>下拉 - 引用下一个题注：</strong>从当前位置向后查找题注并插入动态引用。</li>
-        <li><strong>下拉 - 引用上一个题注：</strong>从当前位置向前查找题注并插入动态引用。</li>
-        <li><strong>下拉 - 引用自定义题注：</strong>弹出列表，选择具体图注或表注后插入引用。</li>
-      </ul>
-      <p><strong>预期结果：</strong>题注编号变化后，点击“更新 - 更新题注”即可同步题注和引用结果。</p>
-    </section>
-
-    <section id="panes">
-      <h2>窗格显示</h2>
-      <table>
-        <thead><tr><th>窗格</th><th>用途</th></tr></thead>
-        <tbody>
-          <tr><td>书签窗格</td><td>显示当前文档书签，单击项目可定位到书签位置。</td></tr>
-          <tr><td>图注窗格</td><td>显示图片题注，便于检查图注缺失、跳号或位置异常。</td></tr>
-          <tr><td>表注窗格</td><td>显示表格题注，便于检查表注缺失、跳号或续表异常。</td></tr>
-          <tr><td>标识窗格</td><td>显示当前文档中识别到的 SRS、SDS、SDD 等标识。</td></tr>
-          <tr><td>文档检查结果窗格</td><td>显示检查问题列表，单击可跳转到对应位置。</td></tr>
-        </tbody>
-      </table>
-    </section>
-
-    <section id="check">
-      <h2>文档检查</h2>
-      <h3>检查项</h3>
-      <ul>
-        <li><strong>章节标题为空：</strong>检查大纲级别 1-9 的章节标题是否没有文字或只有编号。</li>
-        <li><strong>题注连续性：</strong>检查图注、表注编号是否连续。</li>
-        <li><strong>多级列表连续性：</strong>检查章节号是否符合大纲层级顺序。</li>
-        <li><strong>样式一致性：</strong>检查同一级大纲标题是否使用了不一致的样式。</li>
-        <li><strong>未更新域：</strong>定位“错误！未找到引用源”等失效交叉引用。</li>
-      </ul>
-      <h4>使用步骤</h4>
-      <ol>
-        <li>在“文档检查”分组中勾选需要检查的项目。</li>
-        <li>点击 <strong>开始检查</strong>。</li>
-        <li>在右侧检查结果窗格中查看具体原因。</li>
-        <li>单击某个问题，Word 会跳转到对应位置。</li>
-      </ol>
-      <div class="note">检查项默认不勾选，避免误触后长时间扫描。所有检查项默认不检查表格内部内容。</div>
-    </section>
-
-    <section id="software">
-      <h2>软件专用</h2>
-      <p>当当前文档名称中不包含“软件”时，软件专用分组内功能会变灰不可用，避免在普通文档中误用。</p>
-      <table>
-        <thead><tr><th>功能</th><th>用途</th></tr></thead>
-        <tbody>
-          <tr><td>需求提取</td><td>打开需求提取窗格，提取需求标识，手动补充需求名称和章节号。</td></tr>
-          <tr><td>需求追踪</td><td>打开需求追踪控制台，导入互追文档，建立一对一或一对多映射关系。</td></tr>
-          <tr><td>软件文档检查</td><td>识别软件需求规格说明或软件设计说明，并按 GJB 438C 检查明确章节标题是否齐全。</td></tr>
-        </tbody>
-      </table>
-    </section>
-
-    <section id="tracking">
-      <h2>需求提取与追踪</h2>
-      <h3>需求提取</h3>
-      <p>需求提取用于从当前文档中提取需求标识，并在右侧窗格维护三列数据：需求标识、需求名称、章节号。</p>
-      <ol>
-        <li>打开软件文档后点击 <strong>需求提取</strong>。</li>
-        <li>点击窗格中的 <strong>提取标识</strong>，插件会提取文档中的需求标识。</li>
-        <li>提取完成后，插件跳转到第一个需求标识位置。</li>
-        <li>在正文中选中需求名称，点击浮动 <strong>添加</strong> 按钮或窗格中的 <strong>添加</strong>。</li>
-        <li>插件会把选中文字填入当前需求标识对应行，并自动提取所在章节号，然后跳转到下一个需求标识。</li>
-        <li>点击 <strong>保存</strong>，将提取结果保存到当前 Word 文档中，便于下次打开继续使用。</li>
-        <li>点击 <strong>导出追踪表</strong>，可把当前提取结果导出到 Word 光标所在位置；表格左侧为当前文档需求，右侧为空，便于后续补充追踪关系。</li>
-      </ol>
-      <h4>批量提取</h4>
-      <p>点击 <strong>批量提取</strong> 后，使用鼠标选中文字并松开左键即可自动填入当前行，不需要再点“添加”。取消批量提取后恢复手动添加。需求提取窗格打开期间，Word 原生选中文字后的悬浮工具栏会被隐藏，避免遮挡插件添加按钮。</p>
-      <h4>清除</h4>
-      <p>点击 <strong>清除</strong> 只清除当前行的需求名称和章节号，不清除需求标识。</p>
-      <h3>需求追踪控制台</h3>
-      <p>需求追踪用于把当前文档需求与互追文档需求建立映射关系。当前支持模板包括 <code>SRS-&gt;SDS</code>、<code>SDS-&gt;SRS</code>、<code>SDS-&gt;SDD</code>、<code>SDD-&gt;SDS</code>。</p>
-      <ol>
-        <li>先分别在两个文档中完成需求提取并保存。</li>
-        <li>打开当前文档，点击 <strong>需求追踪</strong>。</li>
-        <li>点击 <strong>导入互追文档</strong>，导入另一份文档的需求提取结果。</li>
-        <li>选择追踪模板。</li>
-        <li>在精简视图中逐条处理当前需求，或切换到详细视图查看完整列表。</li>
-        <li>左侧选择当前需求，右侧可选择一个或多个被追踪需求，形成一对一或一对多关系。</li>
-        <li>点击 <strong>导出追踪表</strong>，确认后把追踪表插入当前 Word 光标位置。</li>
-      </ol>
-      <p><strong>导出结果：</strong>左侧需求必须完整输出；如果某条左侧需求没有追踪关系，右侧单元格留空；如果存在一对多关系，右侧按多行显示。</p>
-      <div class="note">追踪关系会随当前文档保存，避免下次打开后重复建立映射。导出表格字体为黑色，表头会根据文件名推算为软件需求规格说明、软件概要设计说明、软件详细设计说明、软件研制任务书、软件测试说明或系统规格说明。</div>
     </section>
 
     <section id="trouble">
-      <h2>常见问题与建议</h2>
-      <h3>插件没有显示</h3>
-      <ol>
-        <li>确认安装完成后重新打开 Word。</li>
-        <li>检查 <strong>文件 - 选项 - 加载项</strong> 中是否被禁用。</li>
-        <li>确认运行环境包含 .NET Framework 4.7.2 和 VSTO Runtime。</li>
-      </ol>
-      <h3>软件专用按钮为什么是灰色</h3>
-      <p>当前文档名称需要包含“软件”两个字。插件用这个规则避免在普通文档中误触需求提取、需求追踪和软件文档检查。</p>
-      <h3>标题没有出现在导航窗格</h3>
-      <p>通常是段落的大纲级别为正文。把光标放在该段落，使用“大纲级别”下拉框设置为对应级别。</p>
-      <h3>更新章节号前是否要清理手工编号</h3>
-      <p>如果标题文字前是人工输入的 <code>1</code>、<code>1.1</code>、<code>2.3.1</code>，建议先用“清理 - 清除标题前的手工编号”。如果数字本来就是标题文字的一部分，不要执行该清理。</p>
-      <h3>交叉引用显示错误</h3>
-      <p>优先点击“更新 - 更新题注”，再使用 Word 的更新域功能刷新全文域。如果仍出现“错误！未找到引用源”，勾选“未更新域”并点击“开始检查”逐个定位。</p>
-      <h3>需求提取时添加按钮显示异常</h3>
-      <p>需求提取窗格打开后，选中文字松开鼠标会出现插件自己的“添加”按钮；切换到其它软件时按钮会自动隐藏。批量提取模式下不会显示“添加”按钮，而是自动填入当前行。</p>
-      <h3>批量替换前的建议</h3>
-      <ul>
-        <li>先在一个副本文档中验证规则。</li>
-        <li>替换术语时尽量使用准确的查找文本，避免误替换。</li>
-        <li>跨多个文件替换前，建议备份原始文件夹。</li>
-      </ul>
-      <p class="meta">本文档随插件安装在本机，路径通常位于插件安装输出目录的 <code>Help</code> 文件夹。</p>
+      <h2>常见问题</h2>
+      <h3>打开 Word 后没有插件</h3>
+      <p>先检查 Word 加载项是否被禁用，再确认 .NET Framework 和 VSTO Runtime 是否安装完整。</p>
+
+      <h3>软件专用按钮是灰色</h3>
+      <p>当前文件名需要包含“软件”两个字。插件用这个规则减少普通文档中误触软件专用功能。</p>
+
+      <h3>标题没有出现在 Word 导航窗格</h3>
+      <p>通常是段落大纲级别仍是正文。把光标放到该段落，使用 <strong>大纲级别</strong> 下拉框设置为对应级别。</p>
+
+      <h3>章节号更新后不符合预期</h3>
+      <p>先检查标题是否设置了正确大纲级别，再检查样式绑定中的大纲级别、样式、多级列表关系是否正确。标题前如果有手工数字编号，应先清理手工编号。</p>
+
+      <h3>交叉引用显示“错误！未找到引用源”</h3>
+      <p>勾选 <strong>未更新域</strong> 并点击 <strong>开始检查</strong>，在右侧结果窗格中定位问题位置。修复后更新题注或更新 Word 域。</p>
+
+      <h3>第一次切换到插件选项卡不够快</h3>
+      <p>插件包含较多按钮、下拉控件和 Office 图标，第一次显示时 Word 需要加载并布局这些控件。当前版本已尽量减少启动和首次切换时的文档扫描。</p>
+    </section>
+
+    <section id="thanks">
+      <h2>感谢与反馈</h2>
+      <p>感谢使用“搞快点”插件。这个插件的目标不是替代 Word，而是把写文档时高频、重复、容易出错的步骤尽量自动化，让大家把时间更多放在文档内容本身。</p>
+      <p>如果你在使用中发现问题，或者希望增加更符合实际写文档习惯的功能，可以把意见发送到：</p>
+      <p><strong>302493@105.com</strong></p>
+      <p class="meta">反馈时建议说明 Word 版本、Windows 版本、插件版本、文档类型、复现步骤和截图，这样更容易定位问题。</p>
     </section>
   </div>
 </main>
 </body>
 </html>
-
-

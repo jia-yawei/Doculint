@@ -10,26 +10,12 @@ namespace DocuLint
     public partial class Ribbon1
     {
         private const string HelpDocumentFileName = "插件帮助文档.html";
+        private const string VersionHistoryFileName = "版本更新记录.html";
         private bool helpAboutItemsInitialized;
 
         private void btnOpenHelpDocument_Click(object sender, RibbonControlEventArgs e)
         {
-            string helpPath = GetHelpDocumentPath();
-            if (!File.Exists(helpPath))
-            {
-                MessageBox.Show(
-                    $"未找到帮助文档：\r\n{helpPath}",
-                    "帮助文档",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-                return;
-            }
-
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = helpPath,
-                UseShellExecute = true
-            });
+            OpenLocalHtml(GetHelpDocumentPath(), "帮助文档");
         }
 
         private void UpdateHelpVersionLabel()
@@ -59,22 +45,7 @@ namespace DocuLint
 
         private void btnHelpVersion_Click(object sender, RibbonControlEventArgs e)
         {
-            MessageBox.Show(
-                BuildVersionUpdateText(),
-                "更新内容",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-        }
-
-        private static string BuildVersionUpdateText()
-        {
-            return "当前版本：" + GetPluginVersionText() +
-                   "\r\n作者：软件三室" +
-                   "\r\n\r\n更新内容：" +
-                   "\r\n- 增加了软件专用的功能。" +
-                   "\r\n- 更新了样式管理中的逻辑。" +
-                   "\r\n- 修复了部分已知问题。" +
-                   "\r\n- 提高了插件执行效率。";
+            OpenLocalHtml(GetVersionHistoryPath(), "版本更新记录");
         }
 
         private static string GetPluginVersionText()
@@ -86,6 +57,30 @@ namespace DocuLint
         private static string GetHelpDocumentPath()
         {
             return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Help", HelpDocumentFileName);
+        }
+
+        private static string GetVersionHistoryPath()
+        {
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Help", VersionHistoryFileName);
+        }
+
+        private static void OpenLocalHtml(string path, string title)
+        {
+            if (!File.Exists(path))
+            {
+                MessageBox.Show(
+                    $"未找到{title}：\r\n{path}",
+                    title,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = path,
+                UseShellExecute = true
+            });
         }
     }
 }

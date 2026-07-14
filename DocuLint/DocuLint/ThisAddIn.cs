@@ -31,6 +31,7 @@ namespace DocuLint
         private WordDocumentHostAdapter documentHostAdapter;
         // 文档基本信息存储
         private DocumentBasicInfoStore documentBasicInfoStore;
+        private Timer ribbonWarmupTimer;
         // 延迟刷新 Ribbon，避免拖选文字时同步读取 Selection 打断 Word 选区。
         private Timer styleRibbonRefreshTimer;
         // 需求提取批量模式：防抖自动添加。
@@ -55,6 +56,9 @@ namespace DocuLint
             // 初始化文档跳转工具
             documentHostAdapter = new WordDocumentHostAdapter(() => Application);
             documentBasicInfoStore = new DocumentBasicInfoStore();
+            ribbonWarmupTimer = new Timer { Interval = 1200 };
+            ribbonWarmupTimer.Tick += RibbonWarmupTimer_Tick;
+            ribbonWarmupTimer.Start();
             styleRibbonRefreshTimer = new Timer { Interval = 180 };
             styleRibbonRefreshTimer.Tick += StyleRibbonRefreshTimer_Tick;
             requirementExtractionAutoAddTimer = new Timer { Interval = 80 };
@@ -99,6 +103,21 @@ namespace DocuLint
                 }
 
                 styleRibbonRefreshTimer = null;
+            }
+
+            if (ribbonWarmupTimer != null)
+            {
+                try
+                {
+                    ribbonWarmupTimer.Stop();
+                    ribbonWarmupTimer.Tick -= RibbonWarmupTimer_Tick;
+                    ribbonWarmupTimer.Dispose();
+                }
+                catch
+                {
+                }
+
+                ribbonWarmupTimer = null;
             }
 
             if (requirementExtractionAutoAddTimer != null)
@@ -540,7 +559,7 @@ namespace DocuLint
 
         private void Application_WindowActivate(Word.Document doc, Word.Window wn)
         {
-            ScheduleStyleRibbonRefresh(null);
+            StopStyleRibbonRefresh();
             StopRequirementExtractionAutoAdd();
             StopRequirementQuickAddPopup();
             HideRequirementQuickAddPopup();
@@ -581,22 +600,44 @@ namespace DocuLint
             }
         }
 
+        private void RibbonWarmupTimer_Tick(object sender, EventArgs e)
+        {
+            ribbonWarmupTimer?.Stop();
+            try
+            {
+                _ = Globals.Ribbons.Ribbon1;
+            }
+            catch
+            {
+            }
+        }
+
         private void ScheduleStyleRibbonRefresh(Word.Selection selection)
         {
             if (IsNonCollapsedSelection(selection))
             {
-                styleRibbonRefreshTimer?.Stop();
+                StopStyleRibbonRefresh();
                 return;
             }
 
             if (styleRibbonRefreshTimer == null)
             {
-                RefreshStyleRibbon();
                 return;
             }
 
             styleRibbonRefreshTimer.Stop();
             styleRibbonRefreshTimer.Start();
+        }
+
+        private void StopStyleRibbonRefresh()
+        {
+            try
+            {
+                styleRibbonRefreshTimer?.Stop();
+            }
+            catch
+            {
+            }
         }
 
         private void StyleRibbonRefreshTimer_Tick(object sender, EventArgs e)

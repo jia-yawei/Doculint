@@ -29,6 +29,7 @@ namespace DocuLint
         private static volatile bool operationCancelRequested;
         private static IntPtr keyboardHookHandle = IntPtr.Zero;
         private static LowLevelKeyboardProc keyboardHookProc;
+        private const string StyleGalleryPlaceholderLabel = "当前样式";
         internal static bool RequirementTrackingEnabled => true;
 
         private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
@@ -138,10 +139,8 @@ namespace DocuLint
             }
 
             RegisterInstance();
-            EnsureStopShortcutHook();
-            ApplyFeatureAvailability();
             UpdateHelpVersionLabel();
-            InitializeRibbonToolTips();
+            styleGalleryDropDown.ItemsLoading += styleGalleryDropDown_ItemsLoading;
             InitializeOutlineLevelDropDown();
             button9.Click += button9_Click;
             button10.Click += button10_Click;
@@ -149,62 +148,6 @@ namespace DocuLint
             button12.Click += button12_Click;
 
             InitializeStyleGalleriesLightweight();
-            // 刷新按钮高亮状态
-            RefreshCurrentStyleIndicator();
-        }
-
-        private void InitializeRibbonToolTips()
-        {
-            SetTip(btnBatchReplace, "批量替换", "按规则批量查找并替换多个文档中的内容。");
-            SetTip(btnStyleBrush, "格式刷", "调用 Word 原生格式刷，操作逻辑与 Word 自带格式刷一致。");
-            SetTip(btnSwitchWindows, "切换窗口", "调用 Word 原生“视图 > 切换窗口”功能。");
-
-            SetTip(styleGalleryDropDown, "当前样式", "显示当前文档中的样式，选择后应用到当前选区。");
-            SetTip(outlineLevelDropDown, "大纲级别", "显示当前段落的大纲级别，选择后应用到当前选区。");
-            SetTip(btnStyleBinding, "样式绑定", "设置大纲级别、样式和多级列表的绑定关系。");
-            SetTip(btnCreateCustomStyles, "创建自定义样式", "配置并在当前文档中创建“通用1级标题”到“正文”等常用样式。");
-
-            SetTip(button14, "插入图片题注", "在当前光标位置插入“图+自动编号域”。");
-            SetTip(button13, "插入表格题注", "在当前光标位置插入表格题注。");
-            SetTip(splitButtonReferenceCaption, "引用题注", "默认引用下一个题注，也可从下拉菜单选择上一个或自定义题注。");
-            SetTip(button31, "引用自定义题注", "从当前文档题注列表中选择一个题注并插入动态引用。");
-            SetTip(button28, "引用上一个题注", "在当前位置插入上一个题注的动态引用。");
-            SetTip(button29, "引用下一个题注", "在当前位置插入下一个题注的动态引用。");
-
-            SetTip(splitButton2, "选择", "选择文档中的指定对象。");
-            SetTip(splitButtonClean, "清理", "集中执行格式、手工编号和空白页清理。");
-            SetTip(btnInsertTotalPages, "插入总页码", "在当前位置插入文档总页码字段。");
-            SetTip(button8, "插入编号", "调用 Word 原生编号列表，回车后自动继续下一编号。");
-            SetTip(btnApplyHeitiXiaosi, "黑体小四", "将当前选区或输入点设置为黑体、小四字号。");
-            SetTip(btnApplySongtiXiaosi, "宋体小四", "将当前选区或输入点设置为宋体、小四字号。");
-            SetTip(button32, "图片单倍行距", "将当前文档所有图片所在段落设置为单倍行距。");
-            SetTip(btnClearFormatting, "一键清除格式", "将当前选区段落恢复为普通正文文本。");
-            SetTip(btnClearManualHeadingNumbers, "清除标题前的手工编号", "清除当前文档所有标题段落前的手工阿拉伯数字编号。");
-            SetTip(btnCleanBlankPages, "清理空白页", "删除没有文字、表格或图片的空白页面。");
-            SetTip(splitButtonUpdate, "更新", "集中执行目录、总页码、题注和章节号更新。");
-            SetTip(button26, "更新目录", "重新更新当前文档中的目录内容和页码。");
-            SetTip(btnUpdateCaptions, "更新题注", "同步更新当前文档中的图片题注和表格题注。");
-            SetTip(btnUpdateOutlineList, "更新所选章节号", "更新光标所在段落、当前选区或通过选择器选中的标题段落章节号。");
-            SetTip(button7, "更新总页码", "更新文档中的总页码字段。");
-
-            SetTip(splitButton4, "窗格显示", "打开书签、题注或标识窗格。");
-            SetTip(button9, "书签窗格", "显示当前文档书签列表并支持定位。");
-            SetTip(button10, "题注窗格", "显示图注/表注列表并支持定位。");
-            SetTip(button11, "标识窗格", "按文档类型显示标识列表并支持定位。");
-
-            SetTip(button12, "需求追踪", "打开需求追踪控制台并建立映射关系。");
-            SetTip(btnRequirementExtraction, "需求提取", "提取当前文档中的需求名称、需求标识和章节号，也可从选区手动添加。");
-
-            SetTip(chkNonBodyBlankLine, "章节标题为空", "检查大纲级别 1-9 的章节标题是否没有文字或只有手工编号。");
-            SetTip(chkCaptionContinuity, "题注连续性", "检查图题注和表题注编号是否连续。");
-            SetTip(chkListContinuity, "多级列表连续性", "检查标题多级列表编号是否按大纲级别连续。");
-            SetTip(chkBrokenReferences, "未更新域", "检查“错误！未找到引用源”等失效引用结果。");
-            SetTip(btnStartDocumentCheck, "开始检查", "按勾选项扫描当前文档，并在右侧检查结果窗格中逐个跳转问题位置。");
-            SetTip(btnSoftwareDocumentCheck, "软件文档检查", "识别软件需求规格说明或软件设计说明，并按 GJB 438C 检查明确章节标题是否齐全。");
-
-            SetTip(menuHelp, "关于", "查看插件版本、更新内容、作者并打开本地帮助文档。");
-            SetTip(btnHelpVersion, "插件版本号", "点击查看当前版本更新内容。");
-            SetTip(btnOpenHelpDocument, "打开帮助文档", "打开本机随插件安装的功能说明和使用步骤。");
         }
 
         private void ApplyFeatureAvailability()
@@ -223,10 +166,6 @@ namespace DocuLint
             if (button12 != null)
             {
                 button12.Enabled = softwareDocument && RequirementTrackingEnabled;
-                if (!RequirementTrackingEnabled)
-                {
-                    SetTip(button12, "需求追踪", "功能暂未开放，当前不可用。");
-                }
             }
         }
 
@@ -235,55 +174,13 @@ namespace DocuLint
             try
             {
                 Word.Document doc = Globals.ThisAddIn?.Application?.ActiveDocument;
-                string name = ((doc?.Name ?? string.Empty) + " " + (doc?.FullName ?? string.Empty)).Trim();
+                string name = doc?.Name ?? string.Empty;
                 return name.IndexOf("软件", StringComparison.OrdinalIgnoreCase) >= 0;
             }
             catch
             {
                 return false;
             }
-        }
-
-        private static void SetTip(RibbonButton control, string screenTip, string superTip)
-        {
-            if (control == null) return;
-            control.ScreenTip = screenTip;
-            control.SuperTip = superTip;
-        }
-
-        private static void SetTip(RibbonToggleButton control, string screenTip, string superTip)
-        {
-            if (control == null) return;
-            control.ScreenTip = screenTip;
-            control.SuperTip = superTip;
-        }
-
-        private static void SetTip(RibbonSplitButton control, string screenTip, string superTip)
-        {
-            if (control == null) return;
-            control.ScreenTip = screenTip;
-            control.SuperTip = superTip;
-        }
-
-        private static void SetTip(RibbonDropDown control, string screenTip, string superTip)
-        {
-            if (control == null) return;
-            control.ScreenTip = screenTip;
-            control.SuperTip = superTip;
-        }
-
-        private static void SetTip(RibbonMenu control, string screenTip, string superTip)
-        {
-            if (control == null) return;
-            control.ScreenTip = screenTip;
-            control.SuperTip = superTip;
-        }
-
-        private static void SetTip(RibbonCheckBox control, string screenTip, string superTip)
-        {
-            if (control == null) return;
-            control.ScreenTip = screenTip;
-            control.SuperTip = superTip;
         }
 
         internal static void RefreshAllStyleIndicators()
@@ -503,18 +400,25 @@ namespace DocuLint
         // 刷新当前样式下拉框，保持和 Word 当前光标样式一致。
         internal void RefreshCurrentStyleIndicator()
         {
-            string currentDocumentKey = GetActiveDocumentKey();
             if (styleGalleryDropDown == null || styleGalleryDropDown.Items.Count == 0)
             {
-                InitializeStyleGalleriesLightweight();
+                InitializeStyleGalleryPlaceholder();
+                return;
             }
 
+            if (IsStyleGalleryPlaceholderActive())
+            {
+                return;
+            }
+
+            string currentDocumentKey = GetActiveDocumentKey();
             if (!string.Equals(styleGalleryDocumentKey, currentDocumentKey, StringComparison.OrdinalIgnoreCase))
             {
-                InitializeStyleGalleriesLightweight();
+                InitializeStyleGalleryPlaceholder();
+                return;
             }
 
-            if (styleGalleryDropDown == null || styleGalleryDropDown.Items.Count == 0)
+            if (styleGalleryDropDown.Items.Count <= 1)
             {
                 SelectOutlineLevelItem(GetCurrentSelectionOutlineLevel());
                 return;
@@ -527,7 +431,37 @@ namespace DocuLint
 
         private void InitializeStyleGalleriesLightweight()
         {
-            RefreshDocumentStyleGallery();
+            InitializeStyleGalleryPlaceholder();
+        }
+
+        private void InitializeStyleGalleryPlaceholder()
+        {
+            if (styleGalleryDropDown == null)
+            {
+                return;
+            }
+
+            updatingStyleGallery = true;
+            try
+            {
+                styleGalleryDropDown.Items.Clear();
+                styleGalleryStyleNames.Clear();
+                styleGalleryDocumentKey = string.Empty;
+                RibbonDropDownItem item = AddStyleDropDownItem(StyleGalleryPlaceholderLabel, null);
+                styleGalleryDropDown.SelectedItem = item;
+            }
+            finally
+            {
+                updatingStyleGallery = false;
+            }
+        }
+
+        private bool IsStyleGalleryPlaceholderActive()
+        {
+            return string.IsNullOrEmpty(styleGalleryDocumentKey) &&
+                   styleGalleryDropDown != null &&
+                   styleGalleryDropDown.Items.Count == 1 &&
+                   string.Equals(styleGalleryDropDown.Items[0].Label, StyleGalleryPlaceholderLabel, StringComparison.OrdinalIgnoreCase);
         }
 
         private void InitializeOutlineLevelDropDown()
@@ -547,7 +481,7 @@ namespace DocuLint
                 }
 
                 AddOutlineLevelItem("正文");
-                SelectOutlineLevelItem(GetCurrentSelectionOutlineLevel());
+                SelectOutlineLevelItem(10);
             }
             finally
             {
@@ -704,7 +638,7 @@ namespace DocuLint
 
             try
             {
-                return string.IsNullOrWhiteSpace(doc.FullName) ? doc.Name : doc.FullName;
+                return doc.Name ?? string.Empty;
             }
             catch
             {
@@ -906,6 +840,21 @@ namespace DocuLint
             catch (Exception ex)
             {
                 MessageBox.Show($"应用样式失败: {ex.Message}", "文档不加班");
+            }
+        }
+
+        private void styleGalleryDropDown_ItemsLoading(object sender, RibbonControlEventArgs e)
+        {
+            if (styleGalleryDropDown == null)
+            {
+                return;
+            }
+
+            string currentDocumentKey = GetActiveDocumentKey();
+            if (IsStyleGalleryPlaceholderActive()
+                || !string.Equals(styleGalleryDocumentKey, currentDocumentKey, StringComparison.OrdinalIgnoreCase))
+            {
+                RefreshDocumentStyleGallery();
             }
         }
 
@@ -1614,6 +1563,11 @@ namespace DocuLint
             }
         }
 
+        private void DisposeRuntimeResources()
+        {
+            LoadedInstances.Remove(this);
+        }
+
         private static void TryUpdateStatusBar(Word.Application app, string styleName)
         {
             if (app == null)
@@ -1633,6 +1587,7 @@ namespace DocuLint
         internal static void ResetOperationCancellation()
         {
             operationCancelRequested = false;
+            EnsureStopShortcutHook();
         }
 
         internal static void RequestOperationCancellation()
