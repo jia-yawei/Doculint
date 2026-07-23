@@ -25,7 +25,7 @@ namespace DocuLint
     internal static class DocumentMarkerService
     {
         private static readonly Regex RequirementMarkerRegex = new Regex(
-            @"(?<![A-Za-z0-9])(?:(?:[A-Za-z0-9]+-)+)?SRS-\d{4}(?![A-Za-z0-9])",
+            @"(?<![A-Za-z0-9/])(?:(?:[A-Za-z0-9]+(?:/[A-Za-z0-9]+)*-)+)?SRS-\d+(?![A-Za-z0-9])",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex TestMarkerRegex = new Regex(
@@ -33,11 +33,11 @@ namespace DocuLint
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex SystemMarkerRegex = new Regex(
-            @"(?<![A-Za-z0-9])(?:(?:[A-Za-z0-9]+-)+)?SSS-\d{4}(?![A-Za-z0-9])",
+            @"(?<![A-Za-z0-9/])(?:(?:[A-Za-z0-9]+(?:/[A-Za-z0-9]+)*-)+)?SSS-\d+(?![A-Za-z0-9])",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex SoftwareDesignMarkerRegex = new Regex(
-            @"(?<![A-Za-z0-9])(?:(?:[A-Za-z0-9]+-)+)?(?:SDS|SDD)-\d{4}(?![A-Za-z0-9])",
+            @"(?<![A-Za-z0-9/])(?:(?:[A-Za-z0-9]+(?:/[A-Za-z0-9]+)*-)+)?(?:SDS|SDD)-\d+(?![A-Za-z0-9])",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         public static DocumentMarkerCollectionResult CollectMarkers(Word.Document doc)

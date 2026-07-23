@@ -25,12 +25,16 @@ namespace DocuLint
         private readonly Func<Word.Application> applicationAccessor;
         private readonly Button btnImportTarget;
         private readonly Button btnExportTable;
+        private readonly Button btnClearTraceMappings;
         private readonly ComboBox cmbTraceTemplate;
         private readonly Label lblTraceTemplate;
+        private readonly Label lblCustomSourceTitle;
+        private readonly TextBox txtCustomSourceTitle;
+        private readonly Label lblCustomTargetTitle;
+        private readonly TextBox txtCustomTargetTitle;
         private readonly Button btnPreviousSource;
         private readonly Button btnNextSource;
         private readonly Button btnNextUnmappedSource;
-        private readonly ComboBox cmbSourceViewMode;
         private readonly ComboBox cmbSourceFilter;
         private readonly ComboBox cmbTargetFilter;
         private readonly TextBox txtTargetSearch;
@@ -39,7 +43,6 @@ namespace DocuLint
         private readonly DataGridView gridTargetAll;
         private readonly Label lblSourceTitle;
         private readonly Label lblTargetTitle;
-        private readonly Label lblViewMode;
         private readonly Label lblPreviousSource;
         private readonly Label lblCurrentSource;
         private readonly Label lblNextSource;
@@ -80,7 +83,7 @@ namespace DocuLint
                 Padding = new Padding(6)
             };
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 36f));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64f));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             FlowLayoutPanel header = new FlowLayoutPanel
@@ -98,19 +101,18 @@ namespace DocuLint
             btnExportTable.Dock = DockStyle.None;
             btnExportTable.Width = 120;
             btnExportTable.Click += (_, __) => ExportTraceTable();
+            btnClearTraceMappings = CreatePrimaryButton("清空追踪关系");
+            btnClearTraceMappings.Dock = DockStyle.None;
+            btnClearTraceMappings.Width = 156;
+            btnClearTraceMappings.Click += (_, __) => ClearTraceMappings();
             header.Controls.Add(btnImportTarget);
             header.Controls.Add(btnExportTable);
+            header.Controls.Add(btnClearTraceMappings);
             lblTraceTemplate = CreateToolbarLabel("追踪模板");
             lblTraceTemplate.Margin = new Padding(0, 4, 4, 0);
-            cmbTraceTemplate = CreateComboBox("SRS->SDS", "SDS->SRS", "SDS->SDD", "SDD->SDS");
+            cmbTraceTemplate = CreateComboBox("SRS->SDS", "SDS->SRS", "SDS->SDD", "SDD->SDS", "自定义");
             cmbTraceTemplate.Width = 140;
             cmbTraceTemplate.SelectedIndexChanged += (_, __) => OnTraceTemplateChanged();
-            lblViewMode = CreateToolbarLabel("视图");
-            lblViewMode.Margin = new Padding(8, 4, 4, 0);
-            cmbSourceViewMode = CreateComboBox("精简", "详细");
-            cmbSourceViewMode.Width = 116;
-            cmbSourceViewMode.SelectedIndexChanged += (_, __) => RefreshViewPreservingSelection();
-
             FlowLayoutPanel secondHeader = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -119,8 +121,16 @@ namespace DocuLint
             };
             secondHeader.Controls.Add(lblTraceTemplate);
             secondHeader.Controls.Add(cmbTraceTemplate);
-            secondHeader.Controls.Add(lblViewMode);
-            secondHeader.Controls.Add(cmbSourceViewMode);
+            lblCustomSourceTitle = CreateToolbarLabel("左表头");
+            txtCustomSourceTitle = new TextBox { Width = 130, Visible = false, Margin = new Padding(0, 4, 6, 0) };
+            lblCustomTargetTitle = CreateToolbarLabel("右表头");
+            txtCustomTargetTitle = new TextBox { Width = 130, Visible = false, Margin = new Padding(0, 4, 0, 0) };
+            lblCustomSourceTitle.Visible = false;
+            lblCustomTargetTitle.Visible = false;
+            secondHeader.Controls.Add(lblCustomSourceTitle);
+            secondHeader.Controls.Add(txtCustomSourceTitle);
+            secondHeader.Controls.Add(lblCustomTargetTitle);
+            secondHeader.Controls.Add(txtCustomTargetTitle);
 
             TableLayoutPanel split = new TableLayoutPanel
             {
@@ -174,9 +184,13 @@ namespace DocuLint
             sourceContentPanel.Controls.Add(compactSourcePanel);
             recommendedTargetPanel = CreateTargetSectionPanel(lblRecommendedTitle, gridTargetRecommended);
             allTargetPanel = CreateTargetSectionPanel(lblAllTargetTitle, gridTargetAll);
+            TableLayoutPanel targetLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+            targetLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 40f));
+            targetLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 60f));
+            targetLayout.Controls.Add(recommendedTargetPanel, 0, 0);
+            targetLayout.Controls.Add(allTargetPanel, 0, 1);
             targetContentPanel = new Panel { Dock = DockStyle.Fill };
-            targetContentPanel.Controls.Add(recommendedTargetPanel);
-            targetContentPanel.Controls.Add(allTargetPanel);
+            targetContentPanel.Controls.Add(targetLayout);
 
             split.Controls.Add(CreateSourcePane(), 0, 0);
             split.Controls.Add(CreateTargetPane(), 1, 0);
@@ -209,16 +223,63 @@ namespace DocuLint
 
         private void ImportTargetDocument()
         {
-            Word.Document document = GetApplication()?.ActiveDocument;
+            Word.Application app = GetApplication();
+            Word.Document document = PickTargetDocument(app);
             if (document == null)
             {
-                MessageBox.Show(this, "当前没有可导入的活动文档。", "需求追踪");
                 return;
             }
 
             targetSnapshot = BuildSavedSnapshot(document);
             RenderTargets();
             UpdateTitlesAndStatus();
+        }
+
+        private Word.Document PickTargetDocument(Word.Application app)
+        {
+            if (app == null)
+            {
+                MessageBox.Show(this, "当前没有可用的 Word 文档。", "需求追踪");
+                return null;
+            }
+
+            using (OpenFileDialog dialog = new OpenFileDialog())
+            {
+                dialog.Title = "选择互追文档";
+                dialog.Filter = "Word 文档|*.doc;*.docx;*.docm;*.dot;*.dotx;*.dotm|所有文件|*.*";
+                dialog.Multiselect = false;
+
+                string sourceDirectory = Path.GetDirectoryName(sourceDocumentFullName ?? string.Empty);
+                if (!string.IsNullOrWhiteSpace(sourceDirectory) && Directory.Exists(sourceDirectory))
+                {
+                    dialog.InitialDirectory = sourceDirectory;
+                }
+
+                DialogResult result = dialog.ShowDialog();
+                if (result != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.FileName))
+                {
+                    return null;
+                }
+
+                string selectedPath = NormalizeFilePath(dialog.FileName);
+                foreach (Word.Document openDocument in app.Documents)
+                {
+                    if (string.Equals(NormalizeFilePath(openDocument?.FullName), selectedPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return openDocument;
+                    }
+                }
+
+                try
+                {
+                    return app.Documents.Open(dialog.FileName);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, "无法打开所选互追文档：\r\n" + ex.Message, "需求追踪");
+                    return null;
+                }
+            }
         }
 
         private void ExportTraceTable()
@@ -266,15 +327,41 @@ namespace DocuLint
             }
         }
 
+        private void ClearTraceMappings()
+        {
+            if (mappingsBySourceId.Count == 0)
+            {
+                MessageBox.Show(this, "当前没有可清空的追踪关系。", "需求追踪");
+                return;
+            }
+
+            DialogResult result = MessageBox.Show(
+                this,
+                "确认清空当前文档中的全部追踪关系吗？该操作会立即保存。",
+                "清空追踪关系",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+            if (result != DialogResult.Yes)
+            {
+                return;
+            }
+
+            mappingsBySourceId.Clear();
+            selectedTargetId = null;
+            SaveTraceMappingsToSourceDocument();
+            RenderSources(selectedSource?.Id);
+            RenderTargets();
+        }
+
         private List<RequirementTraceExportRow> BuildTraceExportRows()
         {
             Dictionary<string, RequirementItem> targetById = (targetSnapshot?.Requirements ?? new List<RequirementItem>())
-                .Where(item => item != null && !string.IsNullOrWhiteSpace(item.Id) && MatchesTargetTemplate(item))
+                .Where(item => item != null && !string.IsNullOrWhiteSpace(item.Id))
                 .GroupBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
 
             List<RequirementTraceExportRow> rows = new List<RequirementTraceExportRow>();
-            foreach (RequirementItem source in (sourceSnapshot?.Requirements ?? new List<RequirementItem>()).Where(item => item != null && MatchesSourceTemplate(item)))
+            foreach (RequirementItem source in (sourceSnapshot?.Requirements ?? new List<RequirementItem>()).Where(item => item != null))
             {
                 List<RequirementItem> targets = new List<RequirementItem>();
                 if (!string.IsNullOrWhiteSpace(source.Id) &&
@@ -331,7 +418,7 @@ namespace DocuLint
 
             if (snapshot.Requirements.Count == 0)
             {
-                MessageBox.Show(this, $"{snapshot.DisplayName} 中没有已保存的需求提取结果。\r\n请先在该文档中使用“需求提取”，填写并点击“保存”。", "需求追踪");
+                MessageBox.Show(this, $"{snapshot.DisplayName} 中没有已保存的需求提取结果。\r\n请先在该文档中使用“需求提取”并点击“保存”。", "需求追踪");
             }
 
             return snapshot;
@@ -529,16 +616,8 @@ namespace DocuLint
             suppressTargetChanged = true;
             try
             {
-                if (IsCompactView())
-                {
-                    RenderTargetGrid(gridTargetRecommended, GetRecommendedTargets());
-                    gridTargetAll.Rows.Clear();
-                }
-                else
-                {
-                    RenderTargetGrid(gridTargetAll, GetVisibleTargets());
-                    gridTargetRecommended.Rows.Clear();
-                }
+                RenderTargetGrid(gridTargetRecommended, GetRecommendedTargets());
+                RenderTargetGrid(gridTargetAll, GetVisibleTargets());
             }
             finally
             {
@@ -599,7 +678,6 @@ namespace DocuLint
         {
             IEnumerable<RequirementItem> items = sourceSnapshot?.Requirements ?? Enumerable.Empty<RequirementItem>();
             return items.Where(item => item != null)
-                .Where(MatchesSourceTemplate)
                 .Where(MatchesSourceFilter)
                 .ToList();
         }
@@ -608,7 +686,6 @@ namespace DocuLint
         {
             IEnumerable<RequirementItem> items = targetSnapshot?.Requirements ?? Enumerable.Empty<RequirementItem>();
             return items.Where(item => item != null)
-                .Where(MatchesTargetTemplate)
                 .Where(MatchesTargetFilter)
                 .ToList();
         }
@@ -631,7 +708,6 @@ namespace DocuLint
                 .Select(target => new { Target = target, Score = GetNameScore(keywords, target.Name) })
                 .Where(item => item.Score > 0)
                 .OrderByDescending(item => item.Score)
-                .ThenBy(item => IsTargetMappedToAnySource(item.Target.Id))
                 .ThenBy(item => item.Target.Id ?? string.Empty, StringComparer.CurrentCultureIgnoreCase)
                 .Take(20)
                 .Select(item => item.Target)
@@ -661,11 +737,10 @@ namespace DocuLint
 
         private void ApplyViewModeVisibility()
         {
-            bool compact = IsCompactView();
-            compactSourcePanel.Visible = compact;
-            gridSource.Visible = !compact;
-            recommendedTargetPanel.Visible = compact;
-            allTargetPanel.Visible = !compact;
+            compactSourcePanel.Visible = false;
+            gridSource.Visible = true;
+            recommendedTargetPanel.Visible = true;
+            allTargetPanel.Visible = true;
             btnPreviousSource.Enabled = selectedSource != null;
             btnNextSource.Enabled = selectedSource != null;
             btnNextUnmappedSource.Enabled = selectedSource != null;
@@ -1158,7 +1233,6 @@ namespace DocuLint
             int sourceCount = currentSourceViewItems.Count;
             List<RequirementItem> visibleTargets = GetVisibleTargets().ToList();
             int targetCount = visibleTargets.Count;
-            bool compact = IsCompactView();
             int selectedIndex = selectedSource == null
                 ? 0
                 : currentSourceViewItems.FindIndex(item => string.Equals(item.Id, selectedSource.Id, StringComparison.OrdinalIgnoreCase)) + 1;
@@ -1172,10 +1246,8 @@ namespace DocuLint
             lblTargetTitle.Text = string.IsNullOrWhiteSpace(targetSnapshot?.DisplayName)
                 ? $"互追文档需求：{targetTitle}（{targetCount}）"
                 : $"互追文档需求：{targetSnapshot.DisplayName} - {targetTitle}（{targetCount}）";
-            lblRecommendedTitle.Text = $"候选推荐（最多 20 条，当前 {gridTargetRecommended.Rows.Count} 条）";
-            lblAllTargetTitle.Text = compact
-                ? $"全部目标需求（隐藏，{targetCount}）"
-                : $"详细需求列表（{gridTargetAll.Rows.Count} 条）";
+            lblRecommendedTitle.Text = $"候选推荐（当前 {gridTargetRecommended.Rows.Count} 条）";
+            lblAllTargetTitle.Text = $"详细需求列表（{gridTargetAll.Rows.Count} 条）";
         }
 
         private Word.Application GetApplication()
@@ -1591,11 +1663,6 @@ namespace DocuLint
             return panel;
         }
 
-        private bool IsCompactView()
-        {
-            return cmbSourceViewMode == null || cmbSourceViewMode.SelectedIndex != 1;
-        }
-
         private RequirementTraceTemplate GetCurrentTraceTemplate()
         {
             if (cmbTraceTemplate == null)
@@ -1611,6 +1678,8 @@ namespace DocuLint
                     return RequirementTraceTemplate.SdsToSdd;
                 case 3:
                     return RequirementTraceTemplate.SddToSds;
+                case 4:
+                    return RequirementTraceTemplate.Custom;
                 default:
                     return RequirementTraceTemplate.SrsToSds;
             }
@@ -1618,6 +1687,11 @@ namespace DocuLint
 
         private void OnTraceTemplateChanged()
         {
+            bool custom = GetCurrentTraceTemplate() == RequirementTraceTemplate.Custom;
+            lblCustomSourceTitle.Visible = custom;
+            txtCustomSourceTitle.Visible = custom;
+            lblCustomTargetTitle.Visible = custom;
+            txtCustomTargetTitle.Visible = custom;
             LoadTraceMappingsFromSourceDocument();
             RefreshViewPreservingSelection();
         }
@@ -1669,6 +1743,10 @@ namespace DocuLint
         {
             switch (GetCurrentTraceTemplate())
             {
+                case RequirementTraceTemplate.Custom:
+                    return sourceSide
+                        ? (txtCustomSourceTitle.Text ?? string.Empty).Trim()
+                        : (txtCustomTargetTitle.Text ?? string.Empty).Trim();
                 case RequirementTraceTemplate.SrsToSds:
                     return sourceSide ? "软件需求规格说明" : "软件概要设计说明";
                 case RequirementTraceTemplate.SdsToSrs:
