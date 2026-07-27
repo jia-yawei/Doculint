@@ -327,11 +327,27 @@ namespace DocuLint
                 Word.WdFieldType.wdFieldNumPages,
                 Type.Missing,
                 false);
-            field?.Update();
+            PreparePaginationForTotalPages(app, doc);
 
             try
             {
-                doc.Fields.Update();
+                field?.Update();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                Word.Range fieldRange = field?.Result?.Duplicate ?? field?.Code?.Duplicate;
+                if (fieldRange != null)
+                {
+                    UpdateTotalPagesFieldsInRange(fieldRange);
+                }
+                else
+                {
+                    doc.Fields.Update();
+                }
             }
             catch
             {

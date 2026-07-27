@@ -189,12 +189,11 @@ namespace DocuLint
             TableLayoutPanel patternLayout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 4
+                ColumnCount = 3
             };
             patternLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112));
             patternLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            patternLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112));
-            patternLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112));
+            patternLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 116));
             rightLayout.Controls.Add(patternLayout, 0, 0);
 
             Label lblPattern = new Label { Text = "文件来源:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font(Font, FontStyle.Bold) };
@@ -203,20 +202,17 @@ namespace DocuLint
             Label lblSourceHint = new Label
             {
                 Dock = DockStyle.Fill,
-                Text = "可浏览文件夹或选择多个文件",
+                Text = "选择单个文件，或选择文件夹导入其中全部 Word 文档",
                 TextAlign = ContentAlignment.MiddleLeft,
                 Margin = new Padding(3, 10, 3, 8)
             };
             patternLayout.Controls.Add(lblSourceHint, 1, 0);
 
-            Button btnAddFiles = new Button { Text = "多文件", Dock = DockStyle.Fill, Margin = new Padding(3, 8, 3, 8) };
-            Button btnAddFolder = new Button { Text = "文件夹", Dock = DockStyle.Fill, Margin = new Padding(3, 8, 3, 8) };
+            Button btnBrowseSource = new Button { Text = "浏览...", Dock = DockStyle.Fill, Margin = new Padding(3, 8, 3, 8) };
             Button btnRemoveNode = new Button { Text = "移除", Width = 88, Height = 30, Margin = new Padding(0, 4, 0, 4) };
-            ApplySecondaryButtonStyle(btnAddFiles);
-            ApplySecondaryButtonStyle(btnAddFolder);
+            ApplySecondaryButtonStyle(btnBrowseSource);
             ApplySecondaryButtonStyle(btnRemoveNode);
-            patternLayout.Controls.Add(btnAddFiles, 2, 0);
-            patternLayout.Controls.Add(btnAddFolder, 3, 0);
+            patternLayout.Controls.Add(btnBrowseSource, 2, 0);
 
             TableLayoutPanel fileHeaderLayout = new TableLayoutPanel
             {
@@ -265,8 +261,7 @@ namespace DocuLint
 
             btnAddRule.Click += (s, e) => AddDefaultRule();
             btnDeleteRule.Click += (s, e) => DeleteSelectedRules();
-            btnAddFiles.Click += (s, e) => AddFileNodes();
-            btnAddFolder.Click += (s, e) => AddFolderNode();
+            btnBrowseSource.Click += (s, e) => ShowSourceBrowseMenu(btnBrowseSource);
             btnRemoveNode.Click += (s, e) => RemoveSelectedNode();
             tvFiles.NodeMouseClick += TvFiles_NodeMouseClick;
 
@@ -373,6 +368,21 @@ namespace DocuLint
             {
                 dgvRules.Rows[i].Cells["colRowNo"].Value = i + 1;
             }
+        }
+
+        private void ShowSourceBrowseMenu(Control anchor)
+        {
+            ContextMenuStrip menu = new ContextMenuStrip();
+            ToolStripMenuItem fileItem = new ToolStripMenuItem("选择文件...");
+            fileItem.ToolTipText = "导入一个或多个指定的 Word 文档";
+            fileItem.Click += (_, __) => AddFileNodes();
+            ToolStripMenuItem folderItem = new ToolStripMenuItem("选择文件夹...");
+            folderItem.ToolTipText = "导入所选文件夹及其子文件夹中的全部 Word 文档";
+            folderItem.Click += (_, __) => AddFolderNode();
+            menu.Items.Add(fileItem);
+            menu.Items.Add(folderItem);
+            menu.Closed += (_, __) => menu.Dispose();
+            menu.Show(anchor, new Point(0, anchor.Height));
         }
 
         private void AddFolderNode()

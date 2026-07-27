@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Text.RegularExpressions;
-
 namespace DocuLint
 {
     internal enum RequirementTraceTemplate
@@ -9,7 +7,8 @@ namespace DocuLint
         SrsToSds = 0,
         SdsToSrs = 1,
         SdsToSdd = 2,
-        SddToSds = 3
+        SddToSds = 3,
+        Custom = 4
     }
 
     internal enum RequirementTrackingDocumentKind
@@ -63,34 +62,9 @@ namespace DocuLint
             return DisplayText;
         }
 
-        private static string GetShortRequirementId(string id)
-        {
-            if (string.IsNullOrWhiteSpace(id))
-            {
-                return string.Empty;
-            }
-
-            MatchCollection matches = Regex.Matches(id, @"(?<prefix>SSS|SRS|SDS|SDD)\s*[-－–—]\s*\d+", RegexOptions.IgnoreCase);
-            if (matches.Count == 0)
-            {
-                return id;
-            }
-
-            return Regex.Replace(matches[matches.Count - 1].Value, @"\s*[-－–—]\s*", "-").ToUpperInvariant();
-        }
-
         internal static string GetDisplayRequirementId(string id)
         {
-            string shortId = GetShortRequirementId(id);
-            if (string.IsNullOrWhiteSpace(shortId))
-            {
-                return id ?? string.Empty;
-            }
-
-            string raw = (id ?? string.Empty).Trim();
-            return string.Equals(raw, shortId, StringComparison.OrdinalIgnoreCase)
-                ? shortId
-                : "..." + shortId;
+            return (id ?? string.Empty).Trim();
         }
 
         internal static bool ContainsRequirementPrefix(string id, string prefix)

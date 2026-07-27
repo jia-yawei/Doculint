@@ -12,7 +12,7 @@ namespace DocuLint
     internal static class RequirementTrackingWordService
     {
         private static readonly Regex RequirementIdRegex = new Regex(
-            @"(?<![A-Za-z0-9])(?<id>(?:[A-Za-z0-9]+\s*[-－–—]\s*)*(?<suffix>(?<prefix>SSS|SRS)\s*[-－–—]\s*\d+))(?![A-Za-z0-9])",
+            @"(?<![A-Za-z0-9/])(?<id>(?:[A-Za-z0-9]+(?:/[A-Za-z0-9]+)*\s*[-－–—]\s*)*(?<suffix>(?<prefix>SSS|SRS)\s*[-－–—]\s*\d+))(?![A-Za-z0-9])",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex SrsRequirementIdRegex = new Regex(

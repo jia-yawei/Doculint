@@ -17,11 +17,9 @@ namespace DocuLint
     public partial class Ribbon1
     {
         private static readonly List<Ribbon1> LoadedInstances = new List<Ribbon1>();
-        private bool updatingStyleGallery;
         private bool updatingOutlineLevel;
-        private string styleGalleryDocumentKey;
-        private readonly Dictionary<string, string> styleGalleryStyleNames =
-            new Dictionary<string, string>(StringComparer.CurrentCultureIgnoreCase);
+        private readonly Dictionary<string, List<string>> documentStyleNamesCache =
+            new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<int, string> outlineLevelStyleLinks = new Dictionary<int, string>();
         private static Dictionary<int, StyleDefinitionRequest> styleDefinitions;
         private static OutlineNumberPattern outlineNumberPattern = OutlineNumberPattern.Decimal;
@@ -140,7 +138,6 @@ namespace DocuLint
 
             RegisterInstance();
             UpdateHelpVersionLabel();
-            styleGalleryDropDown.ItemsLoading += styleGalleryDropDown_ItemsLoading;
             InitializeOutlineLevelDropDown();
             button9.Click += button9_Click;
             button10.Click += button10_Click;
@@ -188,6 +185,7 @@ namespace DocuLint
             foreach (Ribbon1 ribbon in LoadedInstances.ToArray())
             {
                 ribbon?.RefreshCurrentStyleIndicator();
+                ribbon?.RefreshNavigationPaneState();
                 ribbon?.ApplyFeatureAvailability();
             }
         }
@@ -397,71 +395,66 @@ namespace DocuLint
             }
         }
 
-        // 刷新当前样式下拉框，保持和 Word 当前光标样式一致。
+        // 刷新当前样式显示，保持和 Word 当前光标所在段落样式一致。
         internal void RefreshCurrentStyleIndicator()
-        {
-            if (styleGalleryDropDown == null || styleGalleryDropDown.Items.Count == 0)
-            {
-                InitializeStyleGalleryPlaceholder();
-                return;
-            }
-
-            if (IsStyleGalleryPlaceholderActive())
-            {
-                return;
-            }
-
-            string currentDocumentKey = GetActiveDocumentKey();
-            if (!string.Equals(styleGalleryDocumentKey, currentDocumentKey, StringComparison.OrdinalIgnoreCase))
-            {
-                InitializeStyleGalleryPlaceholder();
-                return;
-            }
-
-            if (styleGalleryDropDown.Items.Count <= 1)
-            {
-                SelectOutlineLevelItem(GetCurrentSelectionOutlineLevel());
-                return;
-            }
-
-            string currentStyleName = GetCurrentSelectionStyleName();
-            SelectStyleGalleryItem(currentStyleName);
-            SelectOutlineLevelItem(GetCurrentSelectionOutlineLevel());
-        }
-
-        private void InitializeStyleGalleriesLightweight()
-        {
-            InitializeStyleGalleryPlaceholder();
-        }
-
-        private void InitializeStyleGalleryPlaceholder()
         {
             if (styleGalleryDropDown == null)
             {
                 return;
             }
 
-            updatingStyleGallery = true;
+            styleGalleryDropDown.Label = "当前样式：" + BuildCurrentStyleGalleryLabel(GetCurrentParagraphStyleName());
+            SelectOutlineLevelItem(GetCurrentSelectionOutlineLevel());
+        }
+
+        private void btnToggleNavigationPane_Click(object sender, RibbonControlEventArgs e)
+        {
             try
             {
-                styleGalleryDropDown.Items.Clear();
-                styleGalleryStyleNames.Clear();
-                styleGalleryDocumentKey = string.Empty;
-                RibbonDropDownItem item = AddStyleDropDownItem(StyleGalleryPlaceholderLabel, null);
-                styleGalleryDropDown.SelectedItem = item;
+                Word.Window activeWindow = Globals.ThisAddIn?.Application?.ActiveWindow;
+                if (activeWindow == null)
+                {
+                    return;
+                }
+
+                activeWindow.DocumentMap = btnToggleNavigationPane.Checked;
+            }
+            catch
+            {
+                try
+                {
+                    Globals.ThisAddIn?.Application?.CommandBars?.ExecuteMso("NavigationPane");
+                }
+                catch
+                {
+                }
             }
             finally
             {
-                updatingStyleGallery = false;
+                RefreshNavigationPaneState();
             }
         }
 
-        private bool IsStyleGalleryPlaceholderActive()
+        private void RefreshNavigationPaneState()
         {
-            return string.IsNullOrEmpty(styleGalleryDocumentKey) &&
-                   styleGalleryDropDown != null &&
-                   styleGalleryDropDown.Items.Count == 1 &&
-                   string.Equals(styleGalleryDropDown.Items[0].Label, StyleGalleryPlaceholderLabel, StringComparison.OrdinalIgnoreCase);
+            if (btnToggleNavigationPane == null)
+            {
+                return;
+            }
+
+            try
+            {
+                Word.Window activeWindow = Globals.ThisAddIn?.Application?.ActiveWindow;
+                btnToggleNavigationPane.Checked = activeWindow != null && activeWindow.DocumentMap;
+            }
+            catch
+            {
+            }
+        }
+
+        private void InitializeStyleGalleriesLightweight()
+        {
+            RefreshCurrentStyleIndicator();
         }
 
         private void InitializeOutlineLevelDropDown()
@@ -545,121 +538,6 @@ namespace DocuLint
             }
         }
 
-        private void RefreshDocumentStyleGallery()
-        {
-            if (styleGalleryDropDown == null)
-            {
-                return;
-            }
-
-            updatingStyleGallery = true;
-            try
-            {
-                styleGalleryDropDown.Items.Clear();
-                styleGalleryStyleNames.Clear();
-
-                Word.Document doc = Globals.ThisAddIn?.Application?.ActiveDocument;
-                if (doc == null)
-                {
-                    styleGalleryDocumentKey = string.Empty;
-                    AddStyleDropDownItem("无活动文档", null);
-                    return;
-                }
-
-                styleGalleryDocumentKey = GetDocumentKey(doc);
-                string currentStyle = GetCurrentSelectionStyleName();
-                RibbonDropDownItem currentItem = AddStyleDropDownItem(BuildCurrentStyleGalleryLabel(currentStyle), null);
-                HashSet<string> usedLabels = new HashSet<string>(StringComparer.CurrentCultureIgnoreCase);
-                foreach (string styleName in GetDocumentStyleNames(doc))
-                {
-                    string displayName = GetUniqueStyleGalleryLabel(FormatStyleGalleryLabel(styleName), usedLabels);
-                    AddStyleDropDownItem(displayName, styleName);
-                }
-
-                if (styleGalleryDropDown.Items.Count == 1)
-                {
-                    AddStyleDropDownItem("未找到样式", null);
-                }
-
-                styleGalleryDropDown.SelectedItem = currentItem;
-            }
-            catch
-            {
-            }
-            finally
-            {
-                updatingStyleGallery = false;
-            }
-        }
-
-        private void SelectStyleGalleryItem(string styleName)
-        {
-            if (styleGalleryDropDown == null || styleGalleryDropDown.Items.Count == 0)
-            {
-                return;
-            }
-
-            updatingStyleGallery = true;
-            try
-            {
-                RibbonDropDownItem currentItem = styleGalleryDropDown.Items[0];
-                currentItem.Label = BuildCurrentStyleGalleryLabel(styleName);
-                currentItem.ScreenTip = styleName ?? string.Empty;
-                currentItem.SuperTip = styleName ?? string.Empty;
-                styleGalleryDropDown.SelectedItem = currentItem;
-            }
-            catch
-            {
-            }
-            finally
-            {
-                updatingStyleGallery = false;
-            }
-        }
-
-        private static string GetActiveDocumentKey()
-        {
-            try
-            {
-                return GetDocumentKey(Globals.ThisAddIn?.Application?.ActiveDocument);
-            }
-            catch
-            {
-                return string.Empty;
-            }
-        }
-
-        private static string GetDocumentKey(Word.Document doc)
-        {
-            if (doc == null)
-            {
-                return string.Empty;
-            }
-
-            try
-            {
-                return doc.Name ?? string.Empty;
-            }
-            catch
-            {
-                return string.Empty;
-            }
-        }
-
-        private RibbonDropDownItem AddStyleDropDownItem(string label, string fullStyleName)
-        {
-            RibbonDropDownItem item = Factory.CreateRibbonDropDownItem();
-            item.Label = label;
-            item.ScreenTip = fullStyleName ?? label;
-            item.SuperTip = fullStyleName ?? label;
-            styleGalleryDropDown.Items.Add(item);
-            if (!string.IsNullOrWhiteSpace(fullStyleName))
-            {
-                styleGalleryStyleNames[label] = fullStyleName;
-            }
-            return item;
-        }
-
         private static string FormatStyleGalleryLabel(string styleName)
         {
             const int maxLength = 24;
@@ -676,35 +554,6 @@ namespace DocuLint
             return string.IsNullOrWhiteSpace(styleName) ? "<空>" : FormatStyleGalleryLabel(styleName);
         }
 
-        private static string GetUniqueStyleGalleryLabel(string label, HashSet<string> usedLabels)
-        {
-            if (usedLabels == null || usedLabels.Add(label))
-            {
-                return label;
-            }
-
-            for (int i = 2; i < 1000; i++)
-            {
-                string suffix = " " + i;
-                string candidate = label.Length + suffix.Length <= 24
-                    ? label + suffix
-                    : label.Substring(0, Math.Max(0, 24 - suffix.Length)) + suffix;
-                if (usedLabels.Add(candidate))
-                {
-                    return candidate;
-                }
-            }
-
-            return label;
-        }
-
-        private string ResolveStyleGalleryStyleName(string label)
-        {
-            return styleGalleryStyleNames.TryGetValue(label ?? string.Empty, out string fullName)
-                ? fullName
-                : label;
-        }
-
         private static IEnumerable<string> GetDocumentStyleNames(Word.Document doc)
         {
             SortedSet<string> names = new SortedSet<string>(StringComparer.CurrentCultureIgnoreCase);
@@ -716,7 +565,13 @@ namespace DocuLint
                 {
                     try
                     {
-                        string name = styles[i]?.NameLocal;
+                        Word.Style style = styles[i];
+                        if (style == null)
+                        {
+                            continue;
+                        }
+
+                        string name = style.NameLocal;
                         if (!string.IsNullOrWhiteSpace(name))
                         {
                             names.Add(name);
@@ -734,20 +589,19 @@ namespace DocuLint
             return names;
         }
 
+
         // 获取Word当前光标所在段落/选区的样式名称
-        private string GetCurrentSelectionStyleName()
+        private string GetCurrentParagraphStyleName()
         {
             try
             {
                 Word.Application app = Globals.ThisAddIn.Application;
                 Word.Selection selection = app?.Selection;
-                Word.Range range = selection?.Range;
-                if (range == null)
+                Word.Paragraph paragraph = selection?.Range?.Paragraphs?[1];
+                if (paragraph?.Range == null)
                     return string.Empty;
 
-                object styleObj = TryGetParagraphStyle(range)
-                    ?? TryGetStyle(range)
-                    ?? TryGetStyle(selection);
+                object styleObj = TryGetStyle(paragraph.Range);
 
                 return ResolveStyleName(styleObj, selection?.Document);
             }
@@ -797,65 +651,6 @@ namespace DocuLint
             }
 
             return Convert.ToString(styleObj) ?? string.Empty;
-        }
-
-        private void styleGalleryDropDown_SelectionChanged(object sender, RibbonControlEventArgs e)
-        {
-            if (updatingStyleGallery || styleGalleryDropDown?.SelectedItem == null)
-            {
-                return;
-            }
-
-            string styleName = ResolveStyleGalleryStyleName(styleGalleryDropDown.SelectedItem.Label);
-            if (string.IsNullOrWhiteSpace(styleName)
-                || styleGalleryDropDown.SelectedItem == styleGalleryDropDown.Items[0]
-                || styleName == "无活动文档"
-                || styleName == "未找到样式")
-            {
-                return;
-            }
-
-            try
-            {
-                Word.Application app = Globals.ThisAddIn.Application;
-                Word.Selection selection = app?.Selection;
-                if (selection == null)
-                {
-                    return;
-                }
-
-                using (new WordPerformanceScope(app))
-                {
-                    if (!TrySetStyle(selection.Range, styleName))
-                    {
-                        TrySetStyle(selection, styleName);
-                    }
-
-                    ApplyLinkedOutlineLevelToSelection(selection, styleName);
-                }
-
-                SelectStyleGalleryItem(styleName);
-                TryUpdateStatusBar(app, styleName);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"应用样式失败: {ex.Message}", "文档不加班");
-            }
-        }
-
-        private void styleGalleryDropDown_ItemsLoading(object sender, RibbonControlEventArgs e)
-        {
-            if (styleGalleryDropDown == null)
-            {
-                return;
-            }
-
-            string currentDocumentKey = GetActiveDocumentKey();
-            if (IsStyleGalleryPlaceholderActive()
-                || !string.Equals(styleGalleryDocumentKey, currentDocumentKey, StringComparison.OrdinalIgnoreCase))
-            {
-                RefreshDocumentStyleGallery();
-            }
         }
 
         private void group2_DialogLauncherClick(object sender, RibbonControlEventArgs e)
@@ -1000,7 +795,7 @@ namespace DocuLint
                 using (StyleLinkSettingsForm form = new StyleLinkSettingsForm(
                     outlineLevelStyleLinks,
                     styleNames,
-                    () => GetDocumentStyleNames(activeDoc),
+                    () => GetCachedDocumentStyleNames(activeDoc),
                     GetCustomStyleNamesForBinding(),
                     outlineNumberPattern,
                     outlineNumberTextSpacing,
@@ -1036,7 +831,7 @@ namespace DocuLint
         private List<string> GetInitialStyleNamesForBinding()
         {
             return outlineLevelStyleLinks.Values
-                .Concat(new[] { GetCurrentSelectionStyleName() })
+                .Concat(new[] { GetCurrentParagraphStyleName() })
                 .Where(name => !string.IsNullOrWhiteSpace(name))
                 .Distinct(StringComparer.CurrentCultureIgnoreCase)
                 .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
@@ -1051,6 +846,44 @@ namespace DocuLint
                 .Where(name => !string.IsNullOrWhiteSpace(name))
                 .Distinct(StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
+        }
+
+        private List<string> GetCachedDocumentStyleNames(Word.Document doc)
+        {
+            string key = GetDocumentCacheKey(doc);
+            if (!string.IsNullOrWhiteSpace(key) && documentStyleNamesCache.TryGetValue(key, out List<string> cached))
+            {
+                return cached;
+            }
+
+            List<string> styles = GetDocumentStyleNames(doc).ToList();
+            if (!string.IsNullOrWhiteSpace(key))
+            {
+                documentStyleNamesCache[key] = styles;
+            }
+
+            return styles;
+        }
+
+        private static string GetDocumentCacheKey(Word.Document doc)
+        {
+            try
+            {
+                return string.IsNullOrWhiteSpace(doc?.FullName) ? doc?.Name ?? string.Empty : doc.FullName;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private void InvalidateDocumentStyleCache(Word.Document doc)
+        {
+            string key = GetDocumentCacheKey(doc);
+            if (!string.IsNullOrWhiteSpace(key))
+            {
+                documentStyleNamesCache.Remove(key);
+            }
         }
 
         private void btnCreateCustomStyles_Click(object sender, RibbonControlEventArgs e)
@@ -1077,10 +910,23 @@ namespace DocuLint
                     List<StyleDefinitionRequest> definitionsToCreate = form.StyleDefinitions
                         .Where(definition => definition.ShouldCreate)
                         .ToList();
-                    if (definitionsToCreate.Count == 0)
+
+                    List<string> duplicateStyleNames = definitionsToCreate
+                        .Where(definition => DocumentContainsStyle(doc, definition.StyleName))
+                        .Select(definition => definition.StyleName)
+                        .ToList();
+                    if (duplicateStyleNames.Count > 0)
                     {
-                        MessageBox.Show("未勾选需要创建的样式。", "文档不加班");
-                        return;
+                        string names = string.Join("、", duplicateStyleNames);
+                        DialogResult overwriteResult = MessageBox.Show(
+                            "当前文档已存在同名样式：" + names + "。\r\n是否覆盖这些样式并继续创建？",
+                            "创建自定义样式",
+                            MessageBoxButtons.YesNo,
+                            MessageBoxIcon.Warning);
+                        if (overwriteResult != DialogResult.Yes)
+                        {
+                            return;
+                        }
                     }
 
                     using (new WordPerformanceScope(app))
@@ -1091,9 +937,10 @@ namespace DocuLint
                         }
                     }
 
-                    RefreshDocumentStyleGallery();
+                    InvalidateDocumentStyleCache(doc);
+                    InitializeStyleGalleriesLightweight();
                     TryUpdateStatusBar(app, "自定义样式已创建");
-                    MessageBox.Show("自定义样式已创建到当前文档。", "文档不加班");
+                    MessageBox.Show("所选自定义样式已应用到当前文档。", "创建自定义样式");
                 }
             }
             catch (Exception ex)
@@ -1179,6 +1026,23 @@ namespace DocuLint
             TrySetComProperty(style, "QuickStyle", true);
             TrySetComProperty(style, "Visibility", false);
             TrySetComProperty(style, "UnhideWhenUsed", true);
+        }
+
+        private static bool DocumentContainsStyle(Word.Document doc, string styleName)
+        {
+            if (doc == null || string.IsNullOrWhiteSpace(styleName))
+            {
+                return false;
+            }
+
+            try
+            {
+                return doc.Styles[styleName] != null;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static Word.WdParagraphAlignment ToWordParagraphAlignment(int alignment)
@@ -1691,20 +1555,13 @@ namespace DocuLint
 
         private void button12_Click(object sender, RibbonControlEventArgs e)
         {
-            if (RequirementTrackingEnabled)
+            try
             {
-                try
-                {
-                    Globals.ThisAddIn.ShowRequirementTrackingPane();
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"打开需求追踪控制台失败: {ex.Message}", "文档不加班");
-                }
+                Globals.ThisAddIn.ShowRequirementTrackingPane();
             }
-            else
+            catch (Exception ex)
             {
-                MessageBox.Show("需求追踪功能暂未开放，当前不可用。", "文档不加班");
+                MessageBox.Show($"打开需求追踪控制台失败: {ex.Message}", "文档不加班");
             }
         }
 

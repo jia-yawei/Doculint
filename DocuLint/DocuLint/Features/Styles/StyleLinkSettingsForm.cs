@@ -71,6 +71,7 @@ namespace DocuLint
             styleLoader = lazyStyleLoader;
             systemStyleNames = new List<string>();
             AddStyleNames(documentStyleNames);
+            AddStyleNames(customStyles);
 
             NumberPattern = currentNumberPattern;
             NumberTextSpacing = Math.Max(0, Math.Min(2, currentNumberTextSpacing));

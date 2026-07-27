@@ -49,10 +49,11 @@ namespace DocuLint
             this.btnBatchReplace = this.Factory.CreateRibbonButton();
             this.btnStyleBrush = this.Factory.CreateRibbonButton();
             this.group1 = this.Factory.CreateRibbonGroup();
-            this.styleGalleryDropDown = this.Factory.CreateRibbonDropDown();
+            this.styleGalleryDropDown = this.Factory.CreateRibbonLabel();
             this.btnCreateCustomStyles = this.Factory.CreateRibbonButton();
             this.outlineLevelDropDown = this.Factory.CreateRibbonDropDown();
             this.btnStyleBinding = this.Factory.CreateRibbonButton();
+            this.btnToggleNavigationPane = this.Factory.CreateRibbonCheckBox();
             this.group6 = this.Factory.CreateRibbonGroup();
             this.splitButton2 = this.Factory.CreateRibbonSplitButton();
             this.button5 = this.Factory.CreateRibbonButton();
@@ -158,7 +159,7 @@ namespace DocuLint
             // 
             this.btnSaveAllDocuments.Label = "保存所有文档";
             this.btnSaveAllDocuments.Name = "btnSaveAllDocuments";
-            this.btnSaveAllDocuments.OfficeImageId = "FileSaveAll";
+            this.btnSaveAllDocuments.OfficeImageId = "FileSave";
             this.btnSaveAllDocuments.ShowImage = true;
             this.btnSaveAllDocuments.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnSaveAllDocuments_Click);
             // 
@@ -197,6 +198,7 @@ namespace DocuLint
             // 
             this.group1.Items.Add(this.styleGalleryDropDown);
             this.group1.Items.Add(this.outlineLevelDropDown);
+            this.group1.Items.Add(this.btnToggleNavigationPane);
             this.group1.Items.Add(this.btnCreateCustomStyles);
             this.group1.Items.Add(this.btnStyleBinding);
             this.group1.Label = "样式管理";
@@ -204,12 +206,8 @@ namespace DocuLint
             // 
             // styleGalleryDropDown
             // 
-            this.styleGalleryDropDown.Label = "当前样式";
+            this.styleGalleryDropDown.Label = "当前样式：未读取";
             this.styleGalleryDropDown.Name = "styleGalleryDropDown";
-            this.styleGalleryDropDown.OfficeImageId = "GroupShapeStyles";
-            this.styleGalleryDropDown.ShowImage = true;
-            this.styleGalleryDropDown.SizeString = "000000000000";
-            this.styleGalleryDropDown.SelectionChanged += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.styleGalleryDropDown_SelectionChanged);
             // 
             // btnCreateCustomStyles
             // 
@@ -235,6 +233,14 @@ namespace DocuLint
             this.btnStyleBinding.OfficeImageId = "ChangeBinding";
             this.btnStyleBinding.ShowImage = true;
             this.btnStyleBinding.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnStyleBinding_Click);
+            // 
+            // btnToggleNavigationPane
+            // 
+            this.btnToggleNavigationPane.Label = "导航窗格";
+            this.btnToggleNavigationPane.Name = "btnToggleNavigationPane";
+            this.btnToggleNavigationPane.ScreenTip = "显示或隐藏导航窗格";
+            this.btnToggleNavigationPane.SuperTip = "切换 Word 原生导航窗格。";
+            this.btnToggleNavigationPane.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnToggleNavigationPane_Click);
             // 
             // group6
             // 
@@ -511,7 +517,7 @@ namespace DocuLint
             // 
             this.button11.Label = "标识窗格";
             this.button11.Name = "button11";
-            this.button11.OfficeImageId = "DocumentInspect";
+            this.button11.OfficeImageId = "FindDialog";
             this.button11.ShowImage = true;
             // 
             // button12
@@ -587,7 +593,7 @@ namespace DocuLint
             // 
             this.btnSoftwareDocumentCheck.Label = "软件文档检查";
             this.btnSoftwareDocumentCheck.Name = "btnSoftwareDocumentCheck";
-            this.btnSoftwareDocumentCheck.OfficeImageId = "DocumentInspect";
+            this.btnSoftwareDocumentCheck.OfficeImageId = "SpellingAndGrammar";
             this.btnSoftwareDocumentCheck.ShowImage = true;
             this.btnSoftwareDocumentCheck.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnSoftwareDocumentCheck_Click);
             // 
@@ -604,11 +610,12 @@ namespace DocuLint
             this.menuHelp.Label = "关于";
             this.menuHelp.Name = "menuHelp";
             this.menuHelp.OfficeImageId = "Help";
+            this.menuHelp.ShowImage = true;
             // 
             // btnHelpVersion
             // 
             this.btnHelpVersion.Enabled = false;
-            this.btnHelpVersion.Label = "版本号：0.0.1.2";
+            this.btnHelpVersion.Label = "版本号：0.0.1.3";
             this.btnHelpVersion.Name = "btnHelpVersion";
             this.btnHelpVersion.OfficeImageId = "Info";
             this.btnHelpVersion.ShowImage = true;
@@ -655,10 +662,11 @@ namespace DocuLint
 
         internal Microsoft.Office.Tools.Ribbon.RibbonTab tab1;
         internal Microsoft.Office.Tools.Ribbon.RibbonGroup group1;
-        internal Microsoft.Office.Tools.Ribbon.RibbonDropDown styleGalleryDropDown;
+        internal Microsoft.Office.Tools.Ribbon.RibbonLabel styleGalleryDropDown;
         internal Microsoft.Office.Tools.Ribbon.RibbonDropDown outlineLevelDropDown;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnStyleBinding;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnCreateCustomStyles;
+        internal Microsoft.Office.Tools.Ribbon.RibbonCheckBox btnToggleNavigationPane;
         internal Microsoft.Office.Tools.Ribbon.RibbonGroup groupDocumentManage;
         internal Microsoft.Office.Tools.Ribbon.RibbonGroup group4;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnBatchReplace;

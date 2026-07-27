@@ -35,26 +35,27 @@ namespace DocuLint
             }
 
             IList<RequirementTraceExportRow> safeRows = rows ?? Array.Empty<RequirementTraceExportRow>();
+            bool sourceOnly = !includeTargetHeaders;
             int rowCount = Math.Max(1, safeRows.Count) + 2;
             Word.Table table = document.Tables.Add(range, rowCount, 6);
             table.Borders.Enable = 1;
-            table.Range.Font.Name = "宋体";
-            table.Range.Font.Size = 12;
-            table.Range.Font.Color = Word.WdColor.wdColorBlack;
-            table.Range.ParagraphFormat.Alignment = Word.WdParagraphAlignment.wdAlignParagraphCenter;
-            table.Range.Cells.VerticalAlignment = Word.WdCellVerticalAlignment.wdCellAlignVerticalCenter;
-            table.AutoFitBehavior(Word.WdAutoFitBehavior.wdAutoFitWindow);
+            SetTableWidthToPage(document, table);
 
             SetCellText(table, 1, 1, sourceTitle);
-            SetCellText(table, 1, 4, targetTitle);
             SetCellText(table, 2, 1, "要求名称");
             SetCellText(table, 2, 2, "标识");
             SetCellText(table, 2, 3, "章节号");
-            SetCellText(table, 2, 4, includeTargetHeaders ? "需求名称" : string.Empty);
-            SetCellText(table, 2, 5, includeTargetHeaders ? "标识" : string.Empty);
-            SetCellText(table, 2, 6, includeTargetHeaders ? "章节号" : string.Empty);
-            table.Rows[1].Range.Bold = 1;
-            table.Rows[2].Range.Bold = 1;
+
+            if (!sourceOnly)
+            {
+                SetCellText(table, 1, 4, targetTitle);
+                SetCellText(table, 2, 4, "需求名称");
+                SetCellText(table, 2, 5, "标识");
+                SetCellText(table, 2, 6, "章节号");
+            }
+
+            table.Rows[1].Range.Bold = 0;
+            table.Rows[2].Range.Bold = 0;
             table.Rows[1].Range.Font.Color = Word.WdColor.wdColorBlack;
             table.Rows[2].Range.Font.Color = Word.WdColor.wdColorBlack;
 
@@ -69,9 +70,12 @@ namespace DocuLint
                     SetCellText(table, tableRow, 3, row.Source?.SectionNumber);
                 }
 
-                SetCellText(table, tableRow, 4, row.Target?.Name);
-                SetCellText(table, tableRow, 5, RequirementItem.GetDisplayRequirementId(row.Target?.Id));
-                SetCellText(table, tableRow, 6, row.Target?.SectionNumber);
+                if (!sourceOnly)
+                {
+                    SetCellText(table, tableRow, 4, row.Target?.Name);
+                    SetCellText(table, tableRow, 5, RequirementItem.GetDisplayRequirementId(row.Target?.Id));
+                    SetCellText(table, tableRow, 6, row.Target?.SectionNumber);
+                }
             }
 
             MergeCellRange(table, 1, 4, 1, 6);
@@ -79,6 +83,36 @@ namespace DocuLint
             MergeSourceCells(table, safeRows);
 
             table.Range.Font.Color = Word.WdColor.wdColorBlack;
+            table.Range.Font.Name = "宋体";
+            table.Range.Font.NameFarEast = "宋体";
+            table.Range.Font.NameAscii = "宋体";
+            table.Range.Font.NameOther = "宋体";
+            table.Range.Font.Size = 12;
+            table.Range.Font.Bold = 0;
+            table.Range.ParagraphFormat.Alignment = Word.WdParagraphAlignment.wdAlignParagraphCenter;
+            table.Range.Cells.VerticalAlignment = Word.WdCellVerticalAlignment.wdCellAlignVerticalCenter;
+            table.Rows.Alignment = Word.WdRowAlignment.wdAlignRowCenter;
+        }
+
+        private static void SetTableWidthToPage(Word.Document document, Word.Table table)
+        {
+            float usableWidth = document.PageSetup.PageWidth
+                - document.PageSetup.LeftMargin
+                - document.PageSetup.RightMargin;
+            if (usableWidth <= 0)
+            {
+                return;
+            }
+
+            table.AllowAutoFit = false;
+            table.PreferredWidthType = Word.WdPreferredWidthType.wdPreferredWidthPoints;
+            table.PreferredWidth = usableWidth;
+
+            float columnWidth = usableWidth / 6f;
+            for (int column = 1; column <= 6; column++)
+            {
+                table.Columns[column].SetWidth(columnWidth, Word.WdRulerStyle.wdAdjustNone);
+            }
         }
 
         internal static IList<RequirementTraceExportRow> BuildSourceOnlyRows(IEnumerable<RequirementItem> requirements)

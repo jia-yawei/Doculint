@@ -34,6 +34,9 @@ namespace DocuLint
         private Timer ribbonWarmupTimer;
         // 延迟刷新 Ribbon，避免拖选文字时同步读取 Selection 打断 Word 选区。
         private Timer styleRibbonRefreshTimer;
+        private string lastStyleRefreshDocumentKey;
+        private int lastStyleRefreshStart = -1;
+        private int lastStyleRefreshEnd = -1;
         // 需求提取批量模式：防抖自动添加。
         private Timer requirementExtractionAutoAddTimer;
         // 需求提取普通模式：等待鼠标拖选结束后再显示自定义“添加”按钮。
@@ -56,7 +59,7 @@ namespace DocuLint
             // 初始化文档跳转工具
             documentHostAdapter = new WordDocumentHostAdapter(() => Application);
             documentBasicInfoStore = new DocumentBasicInfoStore();
-            ribbonWarmupTimer = new Timer { Interval = 1200 };
+            ribbonWarmupTimer = new Timer { Interval = 350 };
             ribbonWarmupTimer.Tick += RibbonWarmupTimer_Tick;
             ribbonWarmupTimer.Start();
             styleRibbonRefreshTimer = new Timer { Interval = 180 };
@@ -65,6 +68,8 @@ namespace DocuLint
             requirementExtractionAutoAddTimer.Tick += RequirementExtractionAutoAddTimer_Tick;
             requirementQuickAddPopupTimer = new Timer { Interval = 20 };
             requirementQuickAddPopupTimer.Tick += RequirementQuickAddPopupTimer_Tick;
+
+            WarmupRibbonDuringStartup();
 
             if (Application != null)
             {
@@ -244,12 +249,6 @@ namespace DocuLint
 
         internal void ShowRequirementTrackingPane()
         {
-            if (!Ribbon1.RequirementTrackingEnabled)
-            {
-                MessageBox.Show("需求追踪功能暂未开放，当前不可用。", "文档不加班");
-                return;
-            }
-
             EnsureRequirementTrackingPane();
             if (requirementTrackingConsoleControl == null || requirementTrackingTaskPane == null)
             {
@@ -280,7 +279,8 @@ namespace DocuLint
                 return;
             }
 
-            if (requirementExtractionPaneControl.BatchExtractionEnabled)
+            if (!requirementExtractionPaneControl.ExtractionEnabled ||
+                requirementExtractionPaneControl.BatchExtractionEnabled)
             {
                 return;
             }
@@ -340,6 +340,14 @@ namespace DocuLint
                         HideRequirementQuickAddPopup();
                     }
                 };
+                requirementExtractionPaneControl.ExtractionModeChanged += enabled =>
+                {
+                    if (!enabled)
+                    {
+                        StopRequirementQuickAddPopup();
+                        HideRequirementQuickAddPopup();
+                    }
+                };
             }
 
             if (requirementExtractionTaskPane == null)
@@ -351,6 +359,7 @@ namespace DocuLint
                 {
                     if (!IsRequirementExtractionPaneVisible())
                     {
+                        requirementExtractionPaneControl.ConfirmSaveBeforeClosing();
                         StopRequirementQuickAddPopup();
                         HideRequirementQuickAddPopup();
                         RestoreWordSelectionFloaties();
@@ -603,6 +612,11 @@ namespace DocuLint
         private void RibbonWarmupTimer_Tick(object sender, EventArgs e)
         {
             ribbonWarmupTimer?.Stop();
+            WarmupRibbonDuringStartup();
+        }
+
+        private static void WarmupRibbonDuringStartup()
+        {
             try
             {
                 _ = Globals.Ribbons.Ribbon1;
@@ -658,7 +672,42 @@ namespace DocuLint
                 return;
             }
 
+            if (!HasStyleRefreshTargetChanged(selection))
+            {
+                return;
+            }
+
             RefreshStyleRibbon();
+        }
+
+        private bool HasStyleRefreshTargetChanged(Word.Selection selection)
+        {
+            try
+            {
+                Word.Range range = selection?.Range;
+                Word.Document document = selection?.Document;
+                if (range == null || document == null)
+                {
+                    return false;
+                }
+
+                string documentKey = GetDocumentKey(document);
+                if (string.Equals(lastStyleRefreshDocumentKey, documentKey, StringComparison.OrdinalIgnoreCase) &&
+                    lastStyleRefreshStart == range.Start &&
+                    lastStyleRefreshEnd == range.End)
+                {
+                    return false;
+                }
+
+                lastStyleRefreshDocumentKey = documentKey;
+                lastStyleRefreshStart = range.Start;
+                lastStyleRefreshEnd = range.End;
+                return true;
+            }
+            catch
+            {
+                return true;
+            }
         }
 
         private static bool IsNonCollapsedSelection(Word.Selection selection)
@@ -678,6 +727,7 @@ namespace DocuLint
         {
             if (!IsRequirementExtractionPaneVisible() ||
                 requirementExtractionPaneControl == null ||
+                !requirementExtractionPaneControl.ExtractionEnabled ||
                 requirementExtractionPaneControl.BatchExtractionEnabled ||
                 !IsNonCollapsedSelection(selection))
             {
@@ -730,6 +780,7 @@ namespace DocuLint
 
             if (!IsRequirementExtractionPaneVisible() ||
                 requirementExtractionPaneControl == null ||
+                !requirementExtractionPaneControl.ExtractionEnabled ||
                 requirementExtractionPaneControl.BatchExtractionEnabled ||
                 !IsNonCollapsedSelection(selection) ||
                 !SelectionMatchesQuickAddSelection(selection))
@@ -759,6 +810,7 @@ namespace DocuLint
         {
             if (!IsRequirementExtractionPaneVisible() ||
                 requirementExtractionPaneControl == null ||
+                !requirementExtractionPaneControl.ExtractionEnabled ||
                 !requirementExtractionPaneControl.BatchExtractionEnabled ||
                 !IsNonCollapsedSelection(selection))
             {
@@ -1089,7 +1141,7 @@ namespace DocuLint
                 Button button = new Button
                 {
                     Dock = DockStyle.Fill,
-                    Text = "添加",
+                    Text = "提取",
                     Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold),
                     BackColor = Color.FromArgb(47, 111, 237),
                     ForeColor = Color.White,
