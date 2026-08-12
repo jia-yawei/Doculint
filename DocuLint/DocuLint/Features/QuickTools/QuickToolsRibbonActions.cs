@@ -228,6 +228,40 @@ namespace DocuLint
             }
         }
 
+        private void btnCleanInvalidStyles_Click(object sender, RibbonControlEventArgs e)
+        {
+            DialogResult confirmation = MessageBox.Show(
+                "只将第一页没有可见内容且不是正文样式的段落设置为正文。\r\n\r\n只修改段落样式，不删除空段落、自动编号或页面对象。是否继续？",
+                "清除首页无效样式",
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Question);
+            if (confirmation != DialogResult.OK)
+            {
+                return;
+            }
+
+            try
+            {
+                int cleanedCount = ExecuteDocumentCommand("清除首页无效样式", CleanInvalidEmptyHeadingStyles);
+                MessageBox.Show(
+                    cleanedCount > 0
+                        ? $"已将首页 {cleanedCount} 个空白标题段落设置为正文样式。"
+                        : "首页未发现需要清除的空白标题样式段落。",
+                    "文档不加班 清理",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (OperationCanceledException)
+            {
+                TryUpdateStatusBar(Globals.ThisAddIn?.Application, "清除首页无效样式已停止");
+                MessageBox.Show("清除首页无效样式已停止。", "文档不加班 清理", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"清除首页无效样式失败: {ex.Message}", "文档不加班 清理");
+            }
+        }
+
         private void button23_Click(object sender, RibbonControlEventArgs e)
         {
             try
@@ -777,6 +811,159 @@ namespace DocuLint
             }
 
             return deletedCount;
+        }
+
+        private static int CleanInvalidEmptyHeadingStyles()
+        {
+            Word.Application app = Globals.ThisAddIn?.Application;
+            Word.Document doc = app?.ActiveDocument;
+            if (doc?.Content == null)
+            {
+                throw new InvalidOperationException("当前没有活动文档。");
+            }
+
+            int cleanedCount = 0;
+
+            using (new WordPerformanceScope(app))
+            {
+                int firstPageEnd = GetFirstPageEnd(doc);
+                List<Word.Range> styledBlankRanges = CollectBlankStyledParagraphRanges(doc, firstPageEnd);
+                foreach (Word.Range paragraphRange in styledBlankRanges)
+                {
+                    ThrowIfOperationCancelled();
+                    try
+                    {
+                        object normalStyle = Word.WdBuiltinStyle.wdStyleNormal;
+                        paragraphRange.set_Style(ref normalStyle);
+                        cleanedCount++;
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            return cleanedCount;
+        }
+
+        private static List<Word.Range> CollectBlankStyledParagraphRanges(Word.Document doc, int pageEnd)
+        {
+            List<Word.Range> ranges = new List<Word.Range>();
+            if (doc == null)
+            {
+                return ranges;
+            }
+
+            try
+            {
+                int boundedEnd = Math.Max(doc.Content.Start, Math.Min(pageEnd, doc.Content.End));
+                Word.Range firstPage = doc.Range(doc.Content.Start, boundedEnd);
+                Word.Paragraphs paragraphs = firstPage.Paragraphs;
+                int paragraphCount = paragraphs?.Count ?? 0;
+                string normalStyleName = GetNormalStyleName(doc);
+
+                for (int index = 1; index <= paragraphCount; index++)
+                {
+                    ThrowIfOperationCancelled();
+                    Word.Paragraph paragraph = paragraphs[index];
+                    Word.Range paragraphRange = paragraph?.Range;
+                    if (paragraphRange == null || paragraphRange.Start >= boundedEnd)
+                    {
+                        continue;
+                    }
+
+                    if (!IsVisuallyEmptyParagraphText(paragraphRange.Text))
+                    {
+                        continue;
+                    }
+
+                    string styleName = GetParagraphStyleName(paragraph);
+                    if (!IsNormalStyleName(styleName, normalStyleName)
+                        && paragraphRange.Start < boundedEnd)
+                    {
+                        ranges.Add(paragraphRange.Duplicate);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+            }
+
+            return ranges;
+        }
+
+        private static string GetNormalStyleName(Word.Document doc)
+        {
+            try
+            {
+                object key = Word.WdBuiltinStyle.wdStyleNormal;
+                return doc?.Styles?[key]?.NameLocal ?? string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static bool IsNormalStyleName(string styleName, string normalStyleName)
+        {
+            string value = (styleName ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return true;
+            }
+
+            return (!string.IsNullOrWhiteSpace(normalStyleName)
+                    && string.Equals(value, normalStyleName, StringComparison.CurrentCultureIgnoreCase))
+                || string.Equals(value, "正文", StringComparison.CurrentCultureIgnoreCase)
+                || string.Equals(value, "Normal", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static int GetFirstPageEnd(Word.Document doc)
+        {
+            if (doc?.Content == null)
+            {
+                return 0;
+            }
+
+            int pageEnd = doc.Content.End;
+            try
+            {
+                object what = Word.WdGoToItem.wdGoToPage;
+                object which = Word.WdGoToDirection.wdGoToAbsolute;
+                object count = 2;
+                Word.Range secondPage = doc.GoTo(ref what, ref which, ref count);
+                if (secondPage != null
+                    && secondPage.Start > doc.Content.Start
+                    && secondPage.Start < pageEnd)
+                {
+                    pageEnd = secondPage.Start;
+                }
+            }
+            catch
+            {
+            }
+
+            return pageEnd;
+        }
+
+        private static bool IsVisuallyEmptyParagraphText(string text)
+        {
+            string visibleText = (text ?? string.Empty)
+                .Replace("\r", string.Empty)
+                .Replace("\a", string.Empty)
+                .Replace("\t", string.Empty)
+                .Replace("\v", string.Empty)
+                .Replace(" ", string.Empty)
+                .Replace("\u3000", string.Empty)
+                .Replace("\u00A0", string.Empty)
+                .Replace("\u200B", string.Empty)
+                .Replace("\uFEFF", string.Empty);
+            return visibleText.Length == 0;
         }
 
         private static Word.Range TryGetPageRange(Word.Document doc, int page, int pageCount)

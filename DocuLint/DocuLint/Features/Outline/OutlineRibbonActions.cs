@@ -29,6 +29,320 @@ namespace DocuLint
             ExecuteRebuildOutlineList();
         }
 
+        // 点击【章节号修复】按钮：检查连续性，发现异常时重建全文标题编号。
+        private void btnRepairChapterNumbers_Click(object sender, RibbonControlEventArgs e)
+        {
+            ExecuteRepairChapterNumbers();
+        }
+
+        private void ExecuteRepairChapterNumbers()
+        {
+            Word.Application app = Globals.ThisAddIn?.Application;
+            Word.Document doc = app?.ActiveDocument;
+            if (doc == null)
+            {
+                MessageBox.Show("当前没有活动文档。", "文档不加班 章节号");
+                return;
+            }
+
+            DialogResult confirmation = MessageBox.Show(
+                "章节号修复将执行以下操作：\r\n\r\n" +
+                "1. 从目录之后开始检查；未找到目录时从第一页开始。\r\n" +
+                "2. 仅检查 1-9 级大纲标题的自动章节号是否缺失、跳号或不连续。\r\n" +
+                "3. 发现异常时，按标题大纲级别重新应用多级列表编号，并在完成后再次检查。\r\n\r\n" +
+                "此操作可能修改文档中的标题编号，建议先保存当前文档。\r\n\r\n" +
+                "是否确认开始修复？",
+                "确认章节号修复",
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);
+            if (confirmation != DialogResult.OK)
+            {
+                return;
+            }
+
+            OutlineListRebuildOptions options = new OutlineListRebuildOptions
+            {
+                SelectedLevels = new HashSet<int>(Enumerable.Range(1, 9)),
+                ClearManualNumbering = false,
+                NumberPattern = outlineNumberPattern,
+                Alignment = (int)Word.WdListLevelAlignment.wdListLevelAlignLeft,
+                TrailingCharacter = (int)Word.WdTrailingCharacter.wdTrailingNone,
+                NumberTextSpacing = outlineNumberTextSpacing
+            };
+
+            try
+            {
+                ResetOperationCancellation();
+                int scanStart = Math.Max(doc.Content.Start, GetScanStartAfterToc(doc));
+                int initialCheckedHeadingCount;
+                List<string> styleConflicts;
+                List<string> initialIssues;
+                using (OutlineProgressForm checkForm =
+                    new OutlineProgressForm("章节号修复", "正在检查章节号"))
+                {
+                    checkForm.Show();
+                    checkForm.ReportProgress(0, 1, "正在检查标题连续性和样式...");
+                    initialIssues = VerifyChapterNumberContinuity(
+                        doc,
+                        scanStart,
+                        out initialCheckedHeadingCount,
+                        out styleConflicts,
+                        (current, total, message) => checkForm.ReportProgress(current, total, message));
+                }
+                if (initialCheckedHeadingCount == 0)
+                {
+                    MessageBox.Show(
+                        "当前文档中未找到 1-9 级大纲标题，无法检查章节号。",
+                        "章节号修复",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return;
+                }
+
+                if (initialIssues.Count == 0)
+                {
+                    ShowChapterNumberRepairResult(
+                        initialCheckedHeadingCount,
+                        0,
+                        initialIssues,
+                        styleConflicts,
+                        false);
+                    return;
+                }
+
+                int finalCheckedHeadingCount;
+                List<string> finalStyleConflicts;
+                List<string> finalIssues;
+                using (OutlineProgressForm progressForm =
+                    new OutlineProgressForm("章节号修复", "正在修复章节号"))
+                {
+                    progressForm.Show();
+                    progressForm.ReportProgress(0, 1, "正在准备修复章节号...");
+                    using (new WordPerformanceScope(app))
+                    {
+                        RebuildOutlineListWithOptions(
+                            app,
+                            doc,
+                            options,
+                            scanStart,
+                            (current, total, message) =>
+                            {
+                                progressForm.ReportProgress(current, total, message);
+                            });
+                    }
+
+                    app?.ScreenRefresh();
+                    progressForm.ReportProgress(0, 1, "正在复查修复结果...");
+                    finalIssues = VerifyChapterNumberContinuity(
+                        doc,
+                        scanStart,
+                        out finalCheckedHeadingCount,
+                        out finalStyleConflicts,
+                        (current, total, message) => progressForm.ReportProgress(current, total, message));
+                }
+
+                app?.ScreenRefresh();
+                TryUpdateStatusBar(app, finalIssues.Count == 0 ? "章节号修复完成" : "章节号修复后仍有异常");
+                ShowChapterNumberRepairResult(
+                    initialCheckedHeadingCount,
+                    Math.Max(0, initialIssues.Count - finalIssues.Count),
+                    initialIssues,
+                    styleConflicts,
+                    finalIssues.Count > 0);
+            }
+            catch (OperationCanceledException)
+            {
+                TryUpdateStatusBar(app, "章节号修复已停止");
+                MessageBox.Show("章节号修复已停止。", "章节号修复", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "章节号修复", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private static List<string> VerifyChapterNumberContinuity(
+            Word.Document doc,
+            int scanStart,
+            out int checkedHeadingCount,
+            out List<string> styleConflicts,
+            Action<int, int, string> progress = null)
+        {
+            checkedHeadingCount = 0;
+            styleConflicts = new List<string>();
+            List<string> issues = new List<string>();
+            int[] counters = new int[10];
+            HashSet<int> levels = new HashSet<int>(Enumerable.Range(1, 9));
+            Dictionary<int, Dictionary<string, List<string>>> titlesByLevelAndStyle =
+                new Dictionary<int, Dictionary<string, List<string>>>();
+
+            List<Word.Range> headingRanges = CollectOutlineRangesByFind(
+                doc,
+                levels,
+                scanStart,
+                doc.Content.End,
+                progress)
+                .OrderBy(item => item.Start)
+                .ToList();
+            int headingIndex = 0;
+            foreach (Word.Range range in headingRanges)
+            {
+                ThrowIfOperationCancelled();
+                headingIndex++;
+                progress?.Invoke(
+                    headingIndex,
+                    Math.Max(1, headingRanges.Count),
+                    "正在检查标题段落...");
+                Word.Paragraph paragraph = GetHostParagraph(range);
+                if (paragraph?.Range == null || IsInTable(paragraph.Range))
+                {
+                    continue;
+                }
+
+                int level = GetParagraphOutlineLevel(paragraph);
+                string styleName = GetParagraphStyleName(paragraph);
+                if (!string.IsNullOrWhiteSpace(styleName))
+                {
+                    if (!titlesByLevelAndStyle.TryGetValue(
+                        level,
+                        out Dictionary<string, List<string>> titlesByStyle))
+                    {
+                        titlesByStyle = new Dictionary<string, List<string>>(
+                            StringComparer.CurrentCultureIgnoreCase);
+                        titlesByLevelAndStyle[level] = titlesByStyle;
+                    }
+
+                    if (!titlesByStyle.TryGetValue(styleName, out List<string> titles))
+                    {
+                        titles = new List<string>();
+                        titlesByStyle[styleName] = titles;
+                    }
+
+                    string title = CleanParagraphText(range.Text);
+                    titles.Add(string.IsNullOrWhiteSpace(title) ? "<空标题>" : title);
+                }
+
+                checkedHeadingCount++;
+                string listString = GetListString(paragraph);
+                int[] actualNumbers = ParseChapterNumber(listString);
+                if (actualNumbers.Length < level)
+                {
+                    issues.Add(BuildChapterNumberIssue(level, range, "没有自动章节号"));
+                    continue;
+                }
+
+                int[] expectedNumbers = BuildExpectedNumbers(counters, level);
+                string expectedText = string.Join(".", expectedNumbers);
+                string actualText = string.Join(".", actualNumbers.Take(level));
+                if (!string.Equals(actualText, expectedText, StringComparison.Ordinal))
+                {
+                    issues.Add(BuildChapterNumberIssue(level, range, $"应为 {expectedText}，当前为 {listString}"));
+                }
+
+                ApplyActualCounters(counters, actualNumbers, level);
+            }
+
+            foreach (KeyValuePair<int, Dictionary<string, List<string>>> item in
+                titlesByLevelAndStyle.OrderBy(pair => pair.Key))
+            {
+                if (item.Value.Count <= 1)
+                {
+                    continue;
+                }
+
+                KeyValuePair<string, List<string>> majority = item.Value
+                    .OrderByDescending(pair => pair.Value.Count)
+                    .ThenBy(pair => pair.Key, StringComparer.CurrentCultureIgnoreCase)
+                    .First();
+                foreach (KeyValuePair<string, List<string>> mismatch in item.Value
+                    .Where(pair => !string.Equals(
+                        pair.Key,
+                        majority.Key,
+                        StringComparison.CurrentCultureIgnoreCase)))
+                {
+                    foreach (string title in mismatch.Value.Take(3))
+                    {
+                        string displayTitle = title.Length > 32 ? title.Substring(0, 32) + "..." : title;
+                        styleConflicts.Add(
+                            $"{item.Key}级标题“{displayTitle}”使用“{mismatch.Key}”，同级多数标题使用“{majority.Key}”。");
+                    }
+                }
+            }
+
+            return issues;
+        }
+
+        private static int[] ParseChapterNumber(string listString)
+        {
+            string value = (listString ?? string.Empty).Trim();
+            value = value.TrimStart('(', '（').TrimEnd(')', '）').Trim();
+            return ParseDottedNumber(value);
+        }
+
+        private static string BuildChapterNumberIssue(int level, Word.Range range, string reason)
+        {
+            string title = CleanParagraphText(range?.Text);
+            if (title.Length > 32)
+            {
+                title = title.Substring(0, 32) + "...";
+            }
+
+            return string.IsNullOrWhiteSpace(title)
+                ? $"{level}级标题：{reason}。"
+                : $"{level}级标题“{title}”：{reason}。";
+        }
+
+        private static void ShowChapterNumberRepairResult(
+            int totalHeadingCount,
+            int repairedHeadingCount,
+            IEnumerable<string> numberingIssues,
+            IEnumerable<string> styleIssues,
+            bool hasRemainingNumberingIssues)
+        {
+            List<string> styles = (styleIssues ?? Enumerable.Empty<string>())
+                .Where(issue => !string.IsNullOrWhiteSpace(issue))
+                .ToList();
+            List<string> problems = (numberingIssues ?? Enumerable.Empty<string>())
+                .Concat(styles)
+                .Where(issue => !string.IsNullOrWhiteSpace(issue))
+                .Distinct(StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+            const int maxDisplayedItems = 20;
+
+            StringBuilder message = new StringBuilder();
+            message.AppendLine($"总标题数量：{totalHeadingCount}");
+            message.AppendLine($"修复数量：{repairedHeadingCount}");
+
+            if (problems.Count > 0)
+            {
+                message.AppendLine();
+                message.AppendLine("发现的问题：");
+                foreach (string issue in problems.Take(maxDisplayedItems))
+                {
+                    message.AppendLine("- " + issue);
+                }
+
+                if (problems.Count > maxDisplayedItems)
+                {
+                    message.AppendLine($"- 另有 {problems.Count - maxDisplayedItems} 项未显示。");
+                }
+            }
+            else
+            {
+                message.AppendLine();
+                message.AppendLine("未发现问题。");
+            }
+
+            MessageBox.Show(
+                message.ToString().TrimEnd(),
+                "章节号修复",
+                MessageBoxButtons.OK,
+                hasRemainingNumberingIssues || styles.Count > 0
+                    ? MessageBoxIcon.Warning
+                    : MessageBoxIcon.Information);
+        }
+
         private void ExecuteRebuildOutlineList()
         {
             Word.Application app = Globals.ThisAddIn.Application;
@@ -232,13 +546,11 @@ namespace DocuLint
             OutlineRebuildResult result = new OutlineRebuildResult
             {
                 SelectedLevels = selectedLevels.OrderBy(x => x).ToList(),
-                LinkedStyles = new Dictionary<int, string>(),
                 ScanScope = "当前选区"
             };
 
             Stopwatch sw = Stopwatch.StartNew();
             ThrowIfOperationCancelled();
-            ConfigureLinkedStyleOutlineLevels(doc);
             progress(0, 1, "正在读取当前选区标题...");
 
             List<OutlineParagraphSnapshot> targets = CollectSelectedOutlineParagraphs(
@@ -319,7 +631,6 @@ namespace DocuLint
             return new OutlineRebuildResult
             {
                 SelectedLevels = new List<int> { level },
-                LinkedStyles = new Dictionary<int, string>(),
                 ScanScope = "当前段落",
                 TargetParagraphCount = 1,
                 AppliedParagraphCount = 1
@@ -439,6 +750,7 @@ namespace DocuLint
             Word.Application app,
             Word.Document doc,
             OutlineListRebuildOptions options,
+            int scanStart,
             Action<int, int, string> progress)
         {
             // 校验参数
@@ -460,7 +772,7 @@ namespace DocuLint
             OutlineRebuildResult result = new OutlineRebuildResult
             {
                 SelectedLevels = selectedLevels.OrderBy(x => x).ToList(),
-                LinkedStyles = new Dictionary<int, string>()
+                ScanScope = string.Empty
             };
 
             Stopwatch sw = Stopwatch.StartNew();
@@ -473,9 +785,14 @@ namespace DocuLint
                 Stopwatch phaseWatch = new Stopwatch();
 
                 Word.Range scanRange = GetMainStoryRange(doc, out string scanScope);
+                int boundedScanStart = Math.Max(scanRange.Start, Math.Min(scanStart, scanRange.End));
+                if (boundedScanStart > scanRange.Start)
+                {
+                    scanRange.SetRange(boundedScanStart, scanRange.End);
+                    scanScope = "目录之后";
+                }
                 int currentStep = 0;
 
-                ConfigureLinkedStyleOutlineLevels(doc);
                 ThrowIfOperationCancelled();
                 progress(0, 0, "正在按大纲级别查找目标段落...");
                 result.ScanScope = scanScope;
@@ -500,7 +817,7 @@ namespace DocuLint
                 if (targets.Count == 0)
                 {
                     string levelsText = string.Join("、", selectedLevels.OrderBy(level => level));
-                    throw new InvalidOperationException($"未找到 {levelsText} 级大纲标题。请确认段落已设置为对应大纲级别，或先在样式链接中将样式绑定到大纲级别。");
+                    throw new InvalidOperationException($"未找到 {levelsText} 级大纲标题。请确认标题段落已经设置为对应大纲级别。");
                 }
 
                 // 2. 清理手动编号
@@ -694,30 +1011,8 @@ namespace DocuLint
         {
             List<OutlineParagraphSnapshot> targets = new List<OutlineParagraphSnapshot>();
             HashSet<int> seenStarts = new HashSet<int>();
-            List<Word.Range> headingRanges = CollectHeadingRangesByGoTo(doc, includeBlankHeadings: false);
-            int headingCount = headingRanges.Count;
-            int progressInterval = headingCount > 1000 ? 100 : 20;
 
-            foreach (Word.Range headingRange in headingRanges)
-            {
-                ThrowIfOperationCancelled();
-                TryAddOutlineTarget(
-                    headingRange,
-                    selectedLevels,
-                    targetStart,
-                    targetEnd,
-                    detectManualPrefixes,
-                    seenStarts,
-                    targets);
-
-                currentStep++;
-                // 进度更新
-                if (currentStep == 1 || currentStep % progressInterval == 0 || currentStep >= headingCount)
-                {
-                    progress(currentStep, headingCount, "正在扫描标题...");
-                }
-            }
-
+            progress(0, 0, "正在按大纲级别定位标题...");
             foreach (Word.Range outlineRange in CollectOutlineRangesByFind(doc, selectedLevels, targetStart, targetEnd))
             {
                 ThrowIfOperationCancelled();
@@ -731,6 +1026,8 @@ namespace DocuLint
                     targets);
             }
 
+            currentStep = targets.Count;
+            progress(currentStep, currentStep, "已定位标题，准备重刷章节号...");
             return targets.OrderBy(item => item.Start).ToList();
         }
 
@@ -738,7 +1035,8 @@ namespace DocuLint
             Word.Document doc,
             HashSet<int> selectedLevels,
             int? targetStart,
-            int? targetEnd)
+            int? targetEnd,
+            Action<int, int, string> progress = null)
         {
             List<Word.Range> ranges = new List<Word.Range>();
             if (doc?.Content == null || selectedLevels == null || selectedLevels.Count == 0)
@@ -754,43 +1052,82 @@ namespace DocuLint
             }
 
             HashSet<int> seenStarts = new HashSet<int>();
-            foreach (int level in selectedLevels.OrderBy(item => item))
+            List<int> levels = selectedLevels
+                .Where(level => level >= 1 && level <= 9)
+                .OrderBy(level => level)
+                .ToList();
+            int completedLevels = 0;
+            progress?.Invoke(0, Math.Max(1, levels.Count), "正在定位标题段落...");
+
+            foreach (int level in levels)
             {
                 ThrowIfOperationCancelled();
-                Word.Range searchRange = doc.Range(searchStart, searchEnd);
-                Word.Find find = searchRange.Find;
-                find.ClearFormatting();
-                find.Text = string.Empty;
-                find.Forward = true;
-                find.Wrap = Word.WdFindWrap.wdFindStop;
-                find.Format = true;
-                find.ParagraphFormat.OutlineLevel = (Word.WdOutlineLevel)level;
-
-                while (find.Execute())
+                try
                 {
-                    ThrowIfOperationCancelled();
-                    Word.Paragraph paragraph = GetHostParagraph(searchRange);
-                    Word.Range paragraphRange = paragraph?.Range;
-                    if (paragraphRange != null && seenStarts.Add(paragraphRange.Start))
+                    int cursor = searchStart;
+                    int iterationCount = 0;
+                    int maxIterations = Math.Max(1000, searchEnd - searchStart + 1);
+                    while (cursor < searchEnd && iterationCount++ < maxIterations)
                     {
-                        ranges.Add(paragraphRange.Duplicate);
-                    }
+                        ThrowIfOperationCancelled();
+                        Word.Range searchRange = doc.Range(cursor, searchEnd);
+                        Word.Find find = searchRange.Find;
+                        find.ClearFormatting();
+                        find.Text = "^p";
+                        find.Forward = true;
+                        find.Wrap = Word.WdFindWrap.wdFindStop;
+                        find.Format = true;
+                        find.ParagraphFormat.OutlineLevel = (Word.WdOutlineLevel)level;
+                        if (!find.Execute())
+                        {
+                            break;
+                        }
 
-                    int nextStart = Math.Max(searchRange.End, searchRange.Start + 1);
-                    if (nextStart >= searchEnd)
-                    {
-                        break;
-                    }
+                        Word.Paragraph paragraph = GetHostParagraph(searchRange);
+                        Word.Range paragraphRange = paragraph?.Range;
+                        if (paragraphRange != null
+                            && paragraphRange.Start >= searchStart
+                            && paragraphRange.Start < searchEnd
+                            && seenStarts.Add(paragraphRange.Start))
+                        {
+                            ranges.Add(paragraphRange.Duplicate);
+                        }
 
-                    searchRange.SetRange(nextStart, searchEnd);
-                    find = searchRange.Find;
-                    find.ClearFormatting();
-                    find.Text = string.Empty;
-                    find.Forward = true;
-                    find.Wrap = Word.WdFindWrap.wdFindStop;
-                    find.Format = true;
-                    find.ParagraphFormat.OutlineLevel = (Word.WdOutlineLevel)level;
+                        int hitStart = searchRange.Start;
+                        int hitEnd = searchRange.End;
+                        if (hitStart < cursor || hitEnd <= hitStart)
+                        {
+                            break;
+                        }
+
+                        int nextStart = Math.Max(cursor + 1, hitEnd);
+                        if (paragraphRange != null)
+                        {
+                            nextStart = Math.Max(nextStart, paragraphRange.End);
+                        }
+
+                        if (nextStart >= searchEnd)
+                        {
+                            break;
+                        }
+
+                        cursor = nextStart;
+                    }
                 }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // 某一级标题检索失败时继续检查其余大纲级别。
+                }
+
+                completedLevels++;
+                progress?.Invoke(
+                    completedLevels,
+                    Math.Max(1, levels.Count),
+                    $"正在定位标题段落，已找到 {ranges.Count} 个...");
             }
 
             return ranges.OrderBy(item => item.Start).ToList();
@@ -818,7 +1155,7 @@ namespace DocuLint
                     Word.Range searchRange = doc.Range(searchStart, searchEnd);
                     Word.Find find = searchRange.Find;
                     find.ClearFormatting();
-                    find.Text = string.Empty;
+                    find.Text = "^p";
                     find.Forward = true;
                     find.Wrap = Word.WdFindWrap.wdFindStop;
                     find.Format = true;
@@ -1097,31 +1434,23 @@ namespace DocuLint
                     ? startAtByLevel[level]
                     : 1;
                 listLevel.ResetOnHigher = level > 1 ? level - 1 : 0;
-                ApplyListLevelFont(listLevel, GetStyleDefinitionForOutlineLevel(level));
-                string linkedStyle = GetLinkedStyleForOutlineLevel(level);
-                if (!string.IsNullOrWhiteSpace(linkedStyle))
-                {
-                    SetStyleOutlineLevel(doc, linkedStyle, level);
-                    listLevel.LinkedStyle = linkedStyle;
-                }
-                else
-                {
-                    listLevel.LinkedStyle = string.Empty;
-                }
+                ApplyListLevelFont(listLevel, level, GetStyleDefinitionForOutlineLevel(level));
+                listLevel.LinkedStyle = string.Empty;
             }
             return listTemplate;
         }
 
-        private static void ApplyListLevelFont(Word.ListLevel listLevel, StyleDefinitionRequest definition)
+        private static void ApplyListLevelFont(
+            Word.ListLevel listLevel,
+            int level,
+            StyleDefinitionRequest definition)
         {
             if (listLevel == null || definition == null)
             {
                 return;
             }
 
-            string fontName = string.IsNullOrWhiteSpace(definition.ListFontName)
-                ? definition.FontName
-                : definition.ListFontName;
+            string fontName = level == 1 ? "黑体" : "宋体";
             float fontSize = definition.ListFontSize > 0f
                 ? definition.ListFontSize
                 : definition.FontSize;
@@ -1138,6 +1467,9 @@ namespace DocuLint
                 {
                     listLevel.Font.Size = fontSize;
                 }
+
+                listLevel.Font.Bold = 0;
+                listLevel.Font.Color = Word.WdColor.wdColorAutomatic;
             }
             catch
             {

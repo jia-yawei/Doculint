@@ -13,10 +13,10 @@ namespace DocuLint
         private readonly ProgressBar progressBar;
         private readonly Stopwatch uiRefreshWatch = Stopwatch.StartNew();
 
-        public OutlineProgressForm()
+        public OutlineProgressForm(string operationTitle = "自动章节号", string initialMessage = "正在更新章节号")
         {
             Font = SystemFonts.MessageBoxFont;
-            Text = "自动章节号";
+            Text = operationTitle;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterScreen;
             ShowInTaskbar = false;
@@ -44,7 +44,7 @@ namespace DocuLint
                 Dock = DockStyle.Fill,
                 Font = new Font(Font, FontStyle.Bold),
                 ForeColor = SystemColors.ControlText,
-                Text = "正在更新章节号",
+                Text = initialMessage,
                 TextAlign = ContentAlignment.MiddleLeft
             };
 

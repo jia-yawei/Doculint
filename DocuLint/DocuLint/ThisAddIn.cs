@@ -20,8 +20,11 @@ namespace DocuLint
         private RequirementTrackingConsoleControl requirementTrackingConsoleControl;
         // 需求追踪独立任务窗格
         private CustomTaskPane requirementTrackingTaskPane;
+        private readonly Dictionary<int, RequirementExtractionPaneContext> requirementExtractionPanes =
+            new Dictionary<int, RequirementExtractionPaneContext>();
         private RequirementExtractionPaneControl requirementExtractionPaneControl;
         private CustomTaskPane requirementExtractionTaskPane;
+        private bool isSwitchingWordWindow;
         // 文档检查结果界面控件
         private DocumentCheckResultPaneControl documentCheckResultPaneControl;
         // 文档检查结果任务窗格
@@ -157,7 +160,7 @@ namespace DocuLint
 
             RemoveTaskPane(ref navigationTaskPane, ref navigationPaneControl);
             RemoveTaskPane(ref requirementTrackingTaskPane, ref requirementTrackingConsoleControl);
-            RemoveTaskPane(ref requirementExtractionTaskPane, ref requirementExtractionPaneControl);
+            RemoveAllRequirementExtractionPanes();
             RemoveTaskPane(ref documentCheckResultTaskPane, ref documentCheckResultPaneControl);
             DisposeRequirementQuickAddPopup();
             RestoreWordSelectionFloaties();
@@ -329,46 +332,162 @@ namespace DocuLint
 
         private void EnsureRequirementExtractionPane()
         {
-            if (requirementExtractionPaneControl == null)
+            Word.Window activeWindow = null;
+            Word.Document activeDocument = null;
+            try
             {
-                requirementExtractionPaneControl = new RequirementExtractionPaneControl(() => Application);
-                requirementExtractionPaneControl.RequirementActivated += NavigateToStart;
-                requirementExtractionPaneControl.BatchExtractionModeChanged += enabled =>
-                {
-                    if (enabled)
-                    {
-                        HideRequirementQuickAddPopup();
-                    }
-                };
-                requirementExtractionPaneControl.ExtractionModeChanged += enabled =>
-                {
-                    if (!enabled)
-                    {
-                        StopRequirementQuickAddPopup();
-                        HideRequirementQuickAddPopup();
-                    }
-                };
+                activeWindow = Application?.ActiveWindow;
+                activeDocument = Application?.ActiveDocument;
+            }
+            catch
+            {
             }
 
-            if (requirementExtractionTaskPane == null)
+            int windowKey = GetWordWindowKey(activeWindow);
+            if (windowKey == 0)
             {
-                requirementExtractionTaskPane = CustomTaskPanes.Add(requirementExtractionPaneControl, "需求提取");
-                requirementExtractionTaskPane.DockPosition = Office.MsoCTPDockPosition.msoCTPDockPositionRight;
-                requirementExtractionTaskPane.Width = 780;
-                requirementExtractionTaskPane.VisibleChanged += (_, __) =>
+                requirementExtractionPaneControl = null;
+                requirementExtractionTaskPane = null;
+                return;
+            }
+
+            string documentKey = GetDocumentKey(activeDocument);
+            if (requirementExtractionPanes.TryGetValue(
+                windowKey,
+                out RequirementExtractionPaneContext existingContext))
+            {
+                if (string.Equals(
+                    existingContext.DocumentKey,
+                    documentKey,
+                    StringComparison.OrdinalIgnoreCase))
                 {
-                    if (!IsRequirementExtractionPaneVisible())
-                    {
-                        requirementExtractionPaneControl.ConfirmSaveBeforeClosing();
-                        StopRequirementQuickAddPopup();
-                        HideRequirementQuickAddPopup();
-                        RestoreWordSelectionFloaties();
-                    }
-                    else
-                    {
-                        SuppressWordSelectionFloaties();
-                    }
-                };
+                    SetActiveRequirementExtractionPane(existingContext);
+                    return;
+                }
+
+                RemoveRequirementExtractionPane(windowKey, existingContext);
+            }
+
+            RequirementExtractionPaneControl control =
+                new RequirementExtractionPaneControl(() => Application);
+            control.RequirementActivated += NavigateToStart;
+            control.BatchExtractionModeChanged += enabled =>
+            {
+                if (enabled)
+                {
+                    HideRequirementQuickAddPopup();
+                }
+            };
+            control.ExtractionModeChanged += enabled =>
+            {
+                if (!enabled)
+                {
+                    StopRequirementQuickAddPopup();
+                    HideRequirementQuickAddPopup();
+                }
+            };
+
+            CustomTaskPane taskPane = CustomTaskPanes.Add(control, "需求提取", activeWindow);
+            taskPane.DockPosition = Office.MsoCTPDockPosition.msoCTPDockPositionRight;
+            taskPane.Width = 780;
+
+            RequirementExtractionPaneContext context = new RequirementExtractionPaneContext
+            {
+                WindowKey = windowKey,
+                DocumentKey = documentKey,
+                Control = control,
+                TaskPane = taskPane
+            };
+            taskPane.VisibleChanged += (_, __) =>
+                HandleRequirementExtractionPaneVisibleChanged(context);
+            requirementExtractionPanes[windowKey] = context;
+            SetActiveRequirementExtractionPane(context);
+        }
+
+        private void HandleRequirementExtractionPaneVisibleChanged(
+            RequirementExtractionPaneContext context)
+        {
+            if (context == null || context.Removing)
+            {
+                return;
+            }
+
+            bool visible;
+            try
+            {
+                visible = context.TaskPane != null && context.TaskPane.Visible;
+            }
+            catch
+            {
+                visible = false;
+            }
+
+            if (!visible)
+            {
+                string activeDocumentKey = GetDocumentKey(Application?.ActiveDocument);
+                bool sameDocument = !string.IsNullOrWhiteSpace(context.DocumentKey) &&
+                                    string.Equals(
+                                        context.DocumentKey,
+                                        activeDocumentKey,
+                                        StringComparison.OrdinalIgnoreCase);
+                if (!isSwitchingWordWindow && sameDocument)
+                {
+                    context.Control?.ConfirmSaveBeforeClosing();
+                }
+
+                StopRequirementQuickAddPopup();
+                HideRequirementQuickAddPopup();
+                RestoreWordSelectionFloaties();
+                return;
+            }
+
+            if (ReferenceEquals(context.TaskPane, requirementExtractionTaskPane))
+            {
+                SuppressWordSelectionFloaties();
+            }
+        }
+
+        private void SetActiveRequirementExtractionPane(RequirementExtractionPaneContext context)
+        {
+            requirementExtractionPaneControl = context?.Control;
+            requirementExtractionTaskPane = context?.TaskPane;
+        }
+
+        private void SelectRequirementExtractionPaneForWindow(
+            Word.Window window,
+            Word.Document document)
+        {
+            int windowKey = GetWordWindowKey(window);
+            string documentKey = GetDocumentKey(document);
+            if (windowKey != 0 &&
+                requirementExtractionPanes.TryGetValue(
+                    windowKey,
+                    out RequirementExtractionPaneContext context))
+            {
+                if (string.Equals(
+                    context.DocumentKey,
+                    documentKey,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    SetActiveRequirementExtractionPane(context);
+                    return;
+                }
+
+                RemoveRequirementExtractionPane(windowKey, context);
+            }
+
+            SetActiveRequirementExtractionPane(null);
+        }
+
+        private static int GetWordWindowKey(Word.Window window)
+        {
+            try
+            {
+                return window?.Hwnd ?? 0;
+            }
+            catch
+            {
+                return 0;
             }
         }
 
@@ -561,6 +680,7 @@ namespace DocuLint
 
         private void Application_WindowSelectionChange(Word.Selection selection)
         {
+            Ribbon1.HandleStyleBrushSelectionChange(selection);
             ScheduleStyleRibbonRefresh(selection);
             ScheduleRequirementExtractionAutoAdd(selection);
             ScheduleRequirementQuickAddPopup(selection);
@@ -568,6 +688,9 @@ namespace DocuLint
 
         private void Application_WindowActivate(Word.Document doc, Word.Window wn)
         {
+            Ribbon1.HandleStyleBrushWindowActivated(doc);
+            isSwitchingWordWindow = false;
+            SelectRequirementExtractionPaneForWindow(wn, doc);
             StopStyleRibbonRefresh();
             StopRequirementExtractionAutoAdd();
             StopRequirementQuickAddPopup();
@@ -584,6 +707,7 @@ namespace DocuLint
 
         private void Application_WindowDeactivate(Word.Document doc, Word.Window wn)
         {
+            isSwitchingWordWindow = true;
             StopRequirementQuickAddPopup();
             HideRequirementQuickAddPopup();
         }
@@ -1104,6 +1228,57 @@ namespace DocuLint
             }
         }
 
+        private void RemoveRequirementExtractionPane(
+            int windowKey,
+            RequirementExtractionPaneContext context)
+        {
+            if (context == null)
+            {
+                requirementExtractionPanes.Remove(windowKey);
+                return;
+            }
+
+            context.Removing = true;
+            if (ReferenceEquals(requirementExtractionTaskPane, context.TaskPane))
+            {
+                SetActiveRequirementExtractionPane(null);
+            }
+
+            try
+            {
+                if (context.TaskPane != null)
+                {
+                    CustomTaskPanes.Remove(context.TaskPane);
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                context.Control?.Dispose();
+            }
+            catch
+            {
+            }
+
+            requirementExtractionPanes.Remove(windowKey);
+        }
+
+        private void RemoveAllRequirementExtractionPanes()
+        {
+            foreach (KeyValuePair<int, RequirementExtractionPaneContext> item in
+                new List<KeyValuePair<int, RequirementExtractionPaneContext>>(
+                    requirementExtractionPanes))
+            {
+                RemoveRequirementExtractionPane(item.Key, item.Value);
+            }
+
+            requirementExtractionPanes.Clear();
+            SetActiveRequirementExtractionPane(null);
+        }
+
         private void RemoveTaskPane<TControl>(ref CustomTaskPane taskPane, ref TControl control)
             where TControl : class
         {
@@ -1120,6 +1295,15 @@ namespace DocuLint
 
             taskPane = null;
             control = null;
+        }
+
+        private sealed class RequirementExtractionPaneContext
+        {
+            internal int WindowKey { get; set; }
+            internal string DocumentKey { get; set; }
+            internal RequirementExtractionPaneControl Control { get; set; }
+            internal CustomTaskPane TaskPane { get; set; }
+            internal bool Removing { get; set; }
         }
 
         private sealed class RequirementQuickAddForm : Form

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using Microsoft.Office.Tools.Ribbon;
@@ -106,6 +107,7 @@ namespace DocuLint
                                     }
                                     finally
                                     {
+                                        ReleaseComObject(doc);
                                         doc = null;
                                     }
                                 }
@@ -131,6 +133,7 @@ namespace DocuLint
                                 }
                                 finally
                                 {
+                                    ReleaseComObject(doc);
                                     doc = null;
                                 }
                             }
@@ -172,6 +175,17 @@ namespace DocuLint
                             {
                             }
                         }
+
+                        ReleaseComObject(doc);
+                        doc = null;
+                    }
+
+                    // Word can retain a small number of interop wrappers until a GC pass.
+                    // Reclaim them periodically so long batches do not grow the Word process.
+                    if ((processedFiles + failedFiles.Count) % 5 == 0)
+                    {
+                        GC.Collect();
+                        GC.WaitForPendingFinalizers();
                     }
                 }
             }
@@ -228,7 +242,16 @@ namespace DocuLint
 
                 if (rule.Scope == BatchFindScope.Body || rule.Scope == BatchFindScope.All)
                 {
-                    totalCount += ReplaceInRange(doc.Content, rule, request.FindOnly);
+                    Word.Range contentRange = null;
+                    try
+                    {
+                        contentRange = doc.Content;
+                        totalCount += ReplaceInRange(contentRange, rule, request.FindOnly);
+                    }
+                    finally
+                    {
+                        ReleaseComObject(contentRange);
+                    }
                 }
 
                 if (rule.Scope == BatchFindScope.HeaderFooter || rule.Scope == BatchFindScope.All)
@@ -251,7 +274,6 @@ namespace DocuLint
 
             return totalCount;
         }
-
         private int BuildRenamedPath(string filePath, BatchReplaceExecutionRequest request, out string finalPath)
         {
             finalPath = filePath;
@@ -458,28 +480,44 @@ namespace DocuLint
             bool findOnly)
         {
             int totalCount = 0;
-            Word.Range current;
+            Word.StoryRanges storyRanges = null;
+            Word.Range current = null;
 
             try
             {
-                current = doc.StoryRanges[storyType];
+                storyRanges = doc.StoryRanges;
+                current = storyRanges[storyType];
             }
             catch
             {
                 return 0;
             }
+            finally
+            {
+                ReleaseComObject(storyRanges);
+            }
 
             while (current != null)
             {
-                totalCount += ReplaceInRange(current, rule, findOnly);
+                Word.Range next = null;
                 try
                 {
-                    current = current.NextStoryRange;
+                    totalCount += ReplaceInRange(current, rule, findOnly);
+                    try
+                    {
+                        next = current.NextStoryRange;
+                    }
+                    catch
+                    {
+                        next = null;
+                    }
                 }
-                catch
+                finally
                 {
-                    break;
+                    ReleaseComObject(current);
                 }
+
+                current = next;
             }
 
             return totalCount;
@@ -488,17 +526,22 @@ namespace DocuLint
         private int ReplaceInRange(Word.Range range, BatchReplaceRule rule, bool findOnly)
         {
             int count = CountMatches(range, rule, findOnly);
-            if (count == 0)
+            if (count == 0 || findOnly || rule.HighlightOnly)
             {
-                return 0;
+                return count;
             }
 
-            if (!findOnly && !rule.HighlightOnly)
+            Word.Range replaceRange = null;
+            Word.Find find = null;
+            Word.Replacement replacement = null;
+
+            try
             {
-                Word.Range replaceRange = range.Duplicate;
-                Word.Find find = replaceRange.Find;
+                replaceRange = range.Duplicate;
+                find = replaceRange.Find;
+                replacement = find.Replacement;
                 find.ClearFormatting();
-                find.Replacement.ClearFormatting();
+                replacement.ClearFormatting();
 
                 find.Execute(
                     FindText: rule.FindText,
@@ -513,6 +556,12 @@ namespace DocuLint
                     ReplaceWith: rule.ReplaceText ?? string.Empty,
                     Replace: Word.WdReplace.wdReplaceAll);
             }
+            finally
+            {
+                ReleaseComObject(replacement);
+                ReleaseComObject(find);
+                ReleaseComObject(replaceRange);
+            }
 
             return count;
         }
@@ -525,49 +574,110 @@ namespace DocuLint
             }
 
             int count = 0;
+            Word.Range scanRange = null;
+            Word.Find find = null;
+            Word.Replacement replacement = null;
 
-            Word.Range scanRange = range.Duplicate;
-            Word.Find find = scanRange.Find;
-            find.ClearFormatting();
-            find.Replacement.ClearFormatting();
-
-            while (find.Execute(
-                FindText: rule.FindText,
-                MatchCase: rule.MatchCase,
-                MatchWholeWord: rule.MatchWholeWord,
-                MatchWildcards: rule.FindType == BatchFindType.WordWildcards,
-                MatchSoundsLike: rule.MatchSoundsLike,
-                MatchAllWordForms: rule.MatchAllWordForms,
-                Forward: true,
-                Wrap: Word.WdFindWrap.wdFindStop,
-                Format: false,
-                ReplaceWith: string.Empty,
-                Replace: Word.WdReplace.wdReplaceNone))
+            try
             {
-                count++;
+                scanRange = range.Duplicate;
+                find = scanRange.Find;
+                replacement = find.Replacement;
+                find.ClearFormatting();
+                replacement.ClearFormatting();
 
-                if ((findOnly || rule.HighlightOnly) && scanRange != null)
+                while (find.Execute(
+                    FindText: rule.FindText,
+                    MatchCase: rule.MatchCase,
+                    MatchWholeWord: rule.MatchWholeWord,
+                    MatchWildcards: rule.FindType == BatchFindType.WordWildcards,
+                    MatchSoundsLike: rule.MatchSoundsLike,
+                    MatchAllWordForms: rule.MatchAllWordForms,
+                    Forward: true,
+                    Wrap: Word.WdFindWrap.wdFindStop,
+                    Format: false,
+                    ReplaceWith: string.Empty,
+                    Replace: Word.WdReplace.wdReplaceNone))
                 {
-                    scanRange.HighlightColorIndex = Word.WdColorIndex.wdYellow;
-                }
+                    count++;
 
-                scanRange.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
+                    if (findOnly || rule.HighlightOnly)
+                    {
+                        scanRange.HighlightColorIndex = Word.WdColorIndex.wdYellow;
+                    }
+
+                    scanRange.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
+                }
+            }
+            finally
+            {
+                ReleaseComObject(replacement);
+                ReleaseComObject(find);
+                ReleaseComObject(scanRange);
             }
 
             return count;
         }
-
         private Word.Document FindOpenedDocumentByPath(Word.Application app, string fullPath)
         {
-            foreach (Word.Document doc in app.Documents)
+            Word.Documents documents = null;
+
+            try
             {
-                if (string.Equals(doc.FullName, fullPath, StringComparison.OrdinalIgnoreCase))
+                documents = app.Documents;
+                int documentCount = documents.Count;
+
+                for (int index = 1; index <= documentCount; index++)
                 {
-                    return doc;
+                    Word.Document candidate = null;
+                    bool isMatch = false;
+
+                    try
+                    {
+                        object itemIndex = index;
+                        candidate = documents.get_Item(ref itemIndex);
+                        isMatch = string.Equals(candidate.FullName, fullPath, StringComparison.OrdinalIgnoreCase);
+                        if (isMatch)
+                        {
+                            return candidate;
+                        }
+                    }
+                    finally
+                    {
+                        if (!isMatch)
+                        {
+                            ReleaseComObject(candidate);
+                        }
+                    }
                 }
+            }
+            finally
+            {
+                ReleaseComObject(documents);
             }
 
             return null;
+        }
+
+        private void ReleaseComObject(object comObject)
+        {
+            if (comObject == null || !Marshal.IsComObject(comObject))
+            {
+                return;
+            }
+
+            try
+            {
+                Marshal.ReleaseComObject(comObject);
+            }
+            catch (InvalidComObjectException)
+            {
+                // The object was already released while Word closed the document.
+            }
+            catch (COMException)
+            {
+                // Cleanup must not interrupt processing of the remaining files.
+            }
         }
 
     }

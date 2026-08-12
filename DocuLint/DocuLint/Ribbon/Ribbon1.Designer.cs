@@ -41,18 +41,17 @@ namespace DocuLint
             Microsoft.Office.Tools.Ribbon.RibbonDialogLauncher ribbonDialogLauncherImpl1 = this.Factory.CreateRibbonDialogLauncher();
             this.tab1 = this.Factory.CreateRibbonTab();
             this.groupDocumentManage = this.Factory.CreateRibbonGroup();
-            this.btnSwitchWindows = this.Factory.CreateRibbonMenu();
+            this.btnSwitchWindows = this.Factory.CreateRibbonButton();
             this.btnOpenCurrentFolder = this.Factory.CreateRibbonButton();
             this.btnSaveAllDocuments = this.Factory.CreateRibbonButton();
             this.btnCloseOtherDocuments = this.Factory.CreateRibbonButton();
             this.group4 = this.Factory.CreateRibbonGroup();
             this.btnBatchReplace = this.Factory.CreateRibbonButton();
-            this.btnStyleBrush = this.Factory.CreateRibbonButton();
+            this.btnStyleBrush = this.Factory.CreateRibbonToggleButton();
             this.group1 = this.Factory.CreateRibbonGroup();
             this.styleGalleryDropDown = this.Factory.CreateRibbonLabel();
             this.btnCreateCustomStyles = this.Factory.CreateRibbonButton();
             this.outlineLevelDropDown = this.Factory.CreateRibbonDropDown();
-            this.btnStyleBinding = this.Factory.CreateRibbonButton();
             this.btnToggleNavigationPane = this.Factory.CreateRibbonCheckBox();
             this.group6 = this.Factory.CreateRibbonGroup();
             this.splitButton2 = this.Factory.CreateRibbonSplitButton();
@@ -66,12 +65,14 @@ namespace DocuLint
             this.splitButtonClean = this.Factory.CreateRibbonSplitButton();
             this.btnClearFormatting = this.Factory.CreateRibbonButton();
             this.btnClearManualHeadingNumbers = this.Factory.CreateRibbonButton();
+            this.btnCleanInvalidStyles = this.Factory.CreateRibbonButton();
             this.btnCleanBlankPages = this.Factory.CreateRibbonButton();
             this.splitButtonUpdate = this.Factory.CreateRibbonSplitButton();
             this.button26 = this.Factory.CreateRibbonButton();
             this.button7 = this.Factory.CreateRibbonButton();
             this.btnUpdateCaptions = this.Factory.CreateRibbonButton();
             this.btnUpdateOutlineList = this.Factory.CreateRibbonButton();
+            this.btnRepairChapterNumbers = this.Factory.CreateRibbonButton();
             this.button18 = this.Factory.CreateRibbonButton();
             this.button25 = this.Factory.CreateRibbonButton();
             this.group3 = this.Factory.CreateRibbonGroup();
@@ -139,13 +140,11 @@ namespace DocuLint
             // btnSwitchWindows
             // 
             this.btnSwitchWindows.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeLarge;
-            this.btnSwitchWindows.Dynamic = true;
-            this.btnSwitchWindows.ItemSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeRegular;
             this.btnSwitchWindows.Label = "切换窗口";
             this.btnSwitchWindows.Name = "btnSwitchWindows";
             this.btnSwitchWindows.OfficeImageId = "WindowSwitchWindowsMenuWord";
             this.btnSwitchWindows.ShowImage = true;
-            this.btnSwitchWindows.ItemsLoading += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnSwitchWindows_ItemsLoading);
+            this.btnSwitchWindows.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnSwitchWindows_Click);
             // 
             // btnOpenCurrentFolder
             // 
@@ -192,7 +191,7 @@ namespace DocuLint
             this.btnStyleBrush.Name = "btnStyleBrush";
             this.btnStyleBrush.OfficeImageId = "FormatPainter";
             this.btnStyleBrush.ShowImage = true;
-            this.btnStyleBrush.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnStyleBrush_Click);
+            this.btnStyleBrush.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnPersistentStyleBrush_Click);
             // 
             // group1
             // 
@@ -200,7 +199,7 @@ namespace DocuLint
             this.group1.Items.Add(this.outlineLevelDropDown);
             this.group1.Items.Add(this.btnToggleNavigationPane);
             this.group1.Items.Add(this.btnCreateCustomStyles);
-            this.group1.Items.Add(this.btnStyleBinding);
+            this.group1.Items.Add(this.btnRepairChapterNumbers);
             this.group1.Label = "样式管理";
             this.group1.Name = "group1";
             // 
@@ -225,15 +224,6 @@ namespace DocuLint
             this.outlineLevelDropDown.ShowImage = true;
             this.outlineLevelDropDown.SizeString = "000000";
             this.outlineLevelDropDown.SelectionChanged += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.outlineLevelDropDown_SelectionChanged);
-            // 
-            // btnStyleBinding
-            // 
-            this.btnStyleBinding.Label = "样式绑定";
-            this.btnStyleBinding.Name = "btnStyleBinding";
-            this.btnStyleBinding.OfficeImageId = "ChangeBinding";
-            this.btnStyleBinding.ShowImage = true;
-            this.btnStyleBinding.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnStyleBinding_Click);
-            // 
             // btnToggleNavigationPane
             // 
             this.btnToggleNavigationPane.Label = "导航窗格";
@@ -332,6 +322,7 @@ namespace DocuLint
             // 
             this.splitButtonClean.Items.Add(this.btnClearFormatting);
             this.splitButtonClean.Items.Add(this.btnClearManualHeadingNumbers);
+            this.splitButtonClean.Items.Add(this.btnCleanInvalidStyles);
             this.splitButtonClean.Items.Add(this.btnCleanBlankPages);
             this.splitButtonClean.Label = "清理";
             this.splitButtonClean.Name = "splitButtonClean";
@@ -352,6 +343,16 @@ namespace DocuLint
             this.btnClearManualHeadingNumbers.OfficeImageId = "Numbering";
             this.btnClearManualHeadingNumbers.ShowImage = true;
             this.btnClearManualHeadingNumbers.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnClearManualHeadingNumbers_Click);
+            //
+            // btnCleanInvalidStyles
+            //
+            this.btnCleanInvalidStyles.Label = "清除首页无效样式";
+            this.btnCleanInvalidStyles.Name = "btnCleanInvalidStyles";
+            this.btnCleanInvalidStyles.OfficeImageId = "ClearFormatting";
+            this.btnCleanInvalidStyles.ScreenTip = "清除首页空白段落样式";
+            this.btnCleanInvalidStyles.ShowImage = true;
+            this.btnCleanInvalidStyles.SuperTip = "只将第一页没有可见内容且不是正文样式的段落设置为正文。";
+            this.btnCleanInvalidStyles.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnCleanInvalidStyles_Click);
             // 
             // btnCleanBlankPages
             // 
@@ -404,6 +405,16 @@ namespace DocuLint
             this.btnUpdateOutlineList.OfficeImageId = "Numbering";
             this.btnUpdateOutlineList.ShowImage = true;
             this.btnUpdateOutlineList.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnRebuildOutlineList_Click);
+            //
+            // btnRepairChapterNumbers
+            //
+            this.btnRepairChapterNumbers.Label = "章节号修复";
+            this.btnRepairChapterNumbers.Name = "btnRepairChapterNumbers";
+            this.btnRepairChapterNumbers.OfficeImageId = "Numbering";
+            this.btnRepairChapterNumbers.ShowImage = true;
+            this.btnRepairChapterNumbers.ScreenTip = "检查并修复章节号";
+            this.btnRepairChapterNumbers.SuperTip = "检查全文标题章节号是否连续；发现异常时自动修复，并提示可能原因。";
+            this.btnRepairChapterNumbers.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnRepairChapterNumbers_Click);
             // 
             // button18
             // 
@@ -615,7 +626,7 @@ namespace DocuLint
             // btnHelpVersion
             // 
             this.btnHelpVersion.Enabled = false;
-            this.btnHelpVersion.Label = "版本号：0.0.1.3";
+            this.btnHelpVersion.Label = "版本号：0.0.1.4";
             this.btnHelpVersion.Name = "btnHelpVersion";
             this.btnHelpVersion.OfficeImageId = "Info";
             this.btnHelpVersion.ShowImage = true;
@@ -664,14 +675,13 @@ namespace DocuLint
         internal Microsoft.Office.Tools.Ribbon.RibbonGroup group1;
         internal Microsoft.Office.Tools.Ribbon.RibbonLabel styleGalleryDropDown;
         internal Microsoft.Office.Tools.Ribbon.RibbonDropDown outlineLevelDropDown;
-        internal Microsoft.Office.Tools.Ribbon.RibbonButton btnStyleBinding;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnCreateCustomStyles;
         internal Microsoft.Office.Tools.Ribbon.RibbonCheckBox btnToggleNavigationPane;
         internal Microsoft.Office.Tools.Ribbon.RibbonGroup groupDocumentManage;
         internal Microsoft.Office.Tools.Ribbon.RibbonGroup group4;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnBatchReplace;
-        internal Microsoft.Office.Tools.Ribbon.RibbonButton btnStyleBrush;
-        internal Microsoft.Office.Tools.Ribbon.RibbonMenu btnSwitchWindows;
+        internal Microsoft.Office.Tools.Ribbon.RibbonToggleButton btnStyleBrush;
+        internal Microsoft.Office.Tools.Ribbon.RibbonButton btnSwitchWindows;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnOpenCurrentFolder;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnSaveAllDocuments;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnCloseOtherDocuments;
@@ -690,10 +700,12 @@ namespace DocuLint
         internal Microsoft.Office.Tools.Ribbon.RibbonButton button32;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnClearFormatting;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnClearManualHeadingNumbers;
+        internal Microsoft.Office.Tools.Ribbon.RibbonButton btnCleanInvalidStyles;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnCleanBlankPages;
         internal Microsoft.Office.Tools.Ribbon.RibbonSplitButton splitButtonUpdate;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnUpdateCaptions;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnUpdateOutlineList;
+        internal Microsoft.Office.Tools.Ribbon.RibbonButton btnRepairChapterNumbers;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton button25;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton button8;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnApplyHeitiXiaosi;

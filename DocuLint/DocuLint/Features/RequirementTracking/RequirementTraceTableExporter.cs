@@ -16,6 +16,8 @@ namespace DocuLint
 
     internal static class RequirementTraceTableExporter
     {
+        internal const string TraceTableBookmarkPrefix = "DocuLintTrace_";
+
         internal static void InsertTraceTable(
             Word.Document document,
             Word.Range range,
@@ -92,6 +94,25 @@ namespace DocuLint
             table.Range.ParagraphFormat.Alignment = Word.WdParagraphAlignment.wdAlignParagraphCenter;
             table.Range.Cells.VerticalAlignment = Word.WdCellVerticalAlignment.wdCellAlignVerticalCenter;
             table.Rows.Alignment = Word.WdRowAlignment.wdAlignRowCenter;
+            MarkAsTraceTable(document, table);
+        }
+
+        private static void MarkAsTraceTable(Word.Document document, Word.Table table)
+        {
+            if (document == null || table == null)
+            {
+                return;
+            }
+
+            try
+            {
+                string bookmarkName = TraceTableBookmarkPrefix + Guid.NewGuid().ToString("N");
+                document.Bookmarks.Add(bookmarkName, table.Range);
+            }
+            catch
+            {
+                // The header-based fallback still recognizes trace tables created by older versions.
+            }
         }
 
         private static void SetTableWidthToPage(Word.Document document, Word.Table table)

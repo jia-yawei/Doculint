@@ -22,25 +22,49 @@ namespace DocuLint
         public List<NavigationPaneEntry> Entries { get; set; } = new List<NavigationPaneEntry>();
     }
 
+    internal struct DocumentRangeSpan
+    {
+        public DocumentRangeSpan(int start, int end)
+        {
+            Start = start;
+            End = end;
+        }
+
+        public int Start { get; }
+
+        public int End { get; }
+    }
+
     internal static class DocumentMarkerService
     {
         private static readonly Regex RequirementMarkerRegex = new Regex(
-            @"(?<![A-Za-z0-9/])(?:(?:[A-Za-z0-9]+(?:/[A-Za-z0-9]+)*-)+)?SRS-\d+(?![A-Za-z0-9])",
+            @"(?<![A-Za-z0-9/])/?(?:(?:[A-Za-z0-9]+(?:/[A-Za-z0-9]+)*-)+)?SRS-\d+(?![A-Za-z0-9])",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex TestMarkerRegex = new Regex(
-            @"(?<![A-Za-z0-9])(?:(?:[A-Za-z0-9]+-)+)?SCT_TC_\d{4,6}(?![A-Za-z0-9])",
+            @"(?<![A-Za-z0-9/])/?(?:(?:[A-Za-z0-9]+-)+)?SCT_TC_\d{4,6}(?![A-Za-z0-9])",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex SystemMarkerRegex = new Regex(
-            @"(?<![A-Za-z0-9/])(?:(?:[A-Za-z0-9]+(?:/[A-Za-z0-9]+)*-)+)?SSS-\d+(?![A-Za-z0-9])",
+            @"(?<![A-Za-z0-9/])/?(?:(?:[A-Za-z0-9]+(?:/[A-Za-z0-9]+)*-)+)?SSS-\d+(?![A-Za-z0-9])",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex SoftwareDesignMarkerRegex = new Regex(
-            @"(?<![A-Za-z0-9/])(?:(?:[A-Za-z0-9]+(?:/[A-Za-z0-9]+)*-)+)?(?:SDS|SDD)-\d+(?![A-Za-z0-9])",
+            @"(?<![A-Za-z0-9/])/?(?:(?:[A-Za-z0-9]+(?:/[A-Za-z0-9]+)*-)+)?(?:SDS|SDD)-\d+(?![A-Za-z0-9])",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private static readonly Regex SlashSeparatedMarkerRegex = new Regex(
+            @"(?<![A-Za-z0-9/])/?[A-Za-z][A-Za-z0-9]*/[A-Za-z0-9]+-\d+(?![A-Za-z0-9_-])",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         public static DocumentMarkerCollectionResult CollectMarkers(Word.Document doc)
+        {
+            return CollectMarkers(doc, Enumerable.Empty<string>());
+        }
+
+        public static DocumentMarkerCollectionResult CollectMarkers(
+            Word.Document doc,
+            IEnumerable<string> markerIdentifiers)
         {
             DocumentMarkerCollectionResult result = new DocumentMarkerCollectionResult
             {
@@ -52,11 +76,15 @@ namespace DocuLint
                 return result;
             }
 
-            IEnumerable<Regex> patterns = GetMarkerPatterns(result.DocumentType);
+            List<Regex> customMarkerPatterns = BuildCustomMarkerRegexes(markerIdentifiers);
+            IEnumerable<Regex> patterns = customMarkerPatterns.Count == 0
+                ? GetMarkerPatterns(result.DocumentType)
+                : customMarkerPatterns;
             int scanStart = GetScanStartAfterToc(doc);
             Dictionary<string, NavigationPaneEntry> entryMap = new Dictionary<string, NavigationPaneEntry>(StringComparer.OrdinalIgnoreCase);
+            List<DocumentRangeSpan> traceTableRanges = CollectRequirementTraceTableRanges(doc);
             int chapterCutoff = GetChapterCutoff(result.DocumentType);
-            bool hasChapterCutoff = chapterCutoff > 0;
+            bool hasChapterCutoff = customMarkerPatterns.Count == 0 && chapterCutoff > 0;
 
             try
             {
@@ -64,6 +92,11 @@ namespace DocuLint
                 {
                     Word.Range range = paragraph?.Range;
                     if (range == null || range.End <= scanStart)
+                    {
+                        continue;
+                    }
+
+                    if (IsWithinAnyRange(range.Start, traceTableRanges))
                     {
                         continue;
                     }
@@ -95,6 +128,136 @@ namespace DocuLint
                 .ToList();
 
             return result;
+        }
+
+        private static List<Regex> BuildCustomMarkerRegexes(IEnumerable<string> markerIdentifiers)
+        {
+            List<Regex> patterns = new List<Regex>();
+            foreach (string value in (markerIdentifiers ?? Enumerable.Empty<string>())
+                .Select(item => (item ?? string.Empty).Trim())
+                .Where(item => item.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(3))
+            {
+                patterns.Add(BuildCustomMarkerRegex(value));
+            }
+
+            return patterns;
+        }
+
+        private static Regex BuildCustomMarkerRegex(string markerIdentifier)
+        {
+            string format = (markerIdentifier ?? string.Empty).Trim().TrimStart('/');
+            if (Regex.IsMatch(format, @"^[A-Za-z][A-Za-z0-9_]*$"))
+            {
+                return new Regex(
+                    @"(?<![A-Za-z0-9/])/?(?:(?:[A-Za-z0-9]+(?:/[A-Za-z0-9]+)*-)+)?"
+                    + Regex.Escape(format)
+                    + @"-\d+(?![A-Za-z0-9])",
+                    RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            }
+
+            Match trailingNumber = Regex.Match(format, @"(?<prefix>.*?)(?<number>\d+)$");
+            if (!trailingNumber.Success)
+            {
+                return new Regex(
+                    "(?<![A-Za-z0-9/])/?" + Regex.Escape(format) + "(?![A-Za-z0-9])",
+                    RegexOptions.IgnoreCase | RegexOptions.Compiled);
+            }
+
+            string prefix = Regex.Escape(trailingNumber.Groups["prefix"].Value);
+            int digitCount = trailingNumber.Groups["number"].Value.Length;
+            return new Regex(
+                "(?<![A-Za-z0-9/])/?" + prefix + @"\d{" + digitCount + "}(?![A-Za-z0-9])",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        }
+
+        private static List<DocumentRangeSpan> CollectRequirementTraceTableRanges(Word.Document doc)
+        {
+            List<DocumentRangeSpan> ranges = new List<DocumentRangeSpan>();
+            if (doc == null)
+            {
+                return ranges;
+            }
+
+            try
+            {
+                Word.Bookmarks bookmarks = doc.Bookmarks;
+                for (int index = 1; index <= bookmarks.Count; index++)
+                {
+                    Word.Bookmark bookmark = bookmarks[index];
+                    if (bookmark == null ||
+                        !bookmark.Name.StartsWith(RequirementTraceTableExporter.TraceTableBookmarkPrefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    Word.Range range = bookmark.Range;
+                    if (range != null)
+                    {
+                        ranges.Add(new DocumentRangeSpan(range.Start, range.End));
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                Word.Tables tables = doc.Tables;
+                for (int index = 1; index <= tables.Count; index++)
+                {
+                    Word.Table table = tables[index];
+                    if (!IsLegacyRequirementTraceTable(table))
+                    {
+                        continue;
+                    }
+
+                    Word.Range range = table.Range;
+                    if (range != null)
+                    {
+                        ranges.Add(new DocumentRangeSpan(range.Start, range.End));
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return ranges;
+        }
+
+        private static bool IsLegacyRequirementTraceTable(Word.Table table)
+        {
+            if (table == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (table.Rows.Count < 2 || table.Columns.Count != 6)
+                {
+                    return false;
+                }
+
+                string headerText = string.Join("|", Enumerable.Range(1, 6)
+                    .Select(column => NormalizeParagraphText(table.Cell(2, column).Range.Text)));
+                return headerText.IndexOf("标识", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                       headerText.IndexOf("章节号", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                       (headerText.IndexOf("要求名称", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        headerText.IndexOf("需求名称", StringComparison.OrdinalIgnoreCase) >= 0);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsWithinAnyRange(int position, IEnumerable<DocumentRangeSpan> ranges)
+        {
+            return ranges != null && ranges.Any(range => position >= range.Start && position < range.End);
         }
 
         public static string GetDocumentTypeDisplayName(DocumentMarkerDocumentType documentType)
@@ -140,8 +303,14 @@ namespace DocuLint
                     continue;
                 }
 
-                int start = paragraphRange.Start + match.Index;
                 string displayText = match.Value.Trim();
+                int start = paragraphRange.Start + match.Index;
+                if (displayText.StartsWith("/", StringComparison.Ordinal))
+                {
+                    displayText = displayText.Substring(1);
+                    start++;
+                }
+
                 string key = $"{start}:{displayText}";
                 if (entryMap.ContainsKey(key))
                 {
@@ -161,15 +330,22 @@ namespace DocuLint
             switch (documentType)
             {
                 case DocumentMarkerDocumentType.RequirementSpecification:
-                    return new[] { RequirementMarkerRegex };
+                    return new[] { RequirementMarkerRegex, SlashSeparatedMarkerRegex };
                 case DocumentMarkerDocumentType.SystemSpecification:
-                    return new[] { SystemMarkerRegex };
+                    return new[] { SystemMarkerRegex, SlashSeparatedMarkerRegex };
                 case DocumentMarkerDocumentType.SoftwareDesign:
-                    return new[] { SoftwareDesignMarkerRegex };
+                    return new[] { SoftwareDesignMarkerRegex, SlashSeparatedMarkerRegex };
                 case DocumentMarkerDocumentType.TestSpecification:
-                    return new[] { TestMarkerRegex };
+                    return new[] { TestMarkerRegex, SlashSeparatedMarkerRegex };
                 default:
-                    return new[] { RequirementMarkerRegex, SystemMarkerRegex, SoftwareDesignMarkerRegex, TestMarkerRegex };
+                    return new[]
+                    {
+                        RequirementMarkerRegex,
+                        SystemMarkerRegex,
+                        SoftwareDesignMarkerRegex,
+                        TestMarkerRegex,
+                        SlashSeparatedMarkerRegex
+                    };
             }
         }
 

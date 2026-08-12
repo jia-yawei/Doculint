@@ -18,13 +18,17 @@ namespace DocuLint
     {
         private static readonly List<Ribbon1> LoadedInstances = new List<Ribbon1>();
         private bool updatingOutlineLevel;
-        private readonly Dictionary<string, List<string>> documentStyleNamesCache =
-            new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-        private static readonly Dictionary<int, string> outlineLevelStyleLinks = new Dictionary<int, string>();
         private static Dictionary<int, StyleDefinitionRequest> styleDefinitions;
         private static OutlineNumberPattern outlineNumberPattern = OutlineNumberPattern.Decimal;
         private static int outlineNumberTextSpacing = 1;
         private static volatile bool operationCancelRequested;
+        private static volatile bool styleBrushActive;
+        private static volatile bool styleBrushPersistent;
+        private static volatile bool styleBrushApplying;
+        private static long styleBrushLastClickTicks;
+        private static string styleBrushSourceDocumentKey = string.Empty;
+        private static int styleBrushSourceStart = -1;
+        private static int styleBrushSourceEnd = -1;
         private static IntPtr keyboardHookHandle = IntPtr.Zero;
         private static LowLevelKeyboardProc keyboardHookProc;
         private const string StyleGalleryPlaceholderLabel = "当前样式";
@@ -80,6 +84,114 @@ namespace DocuLint
             internal IntPtr Handle { get; set; }
 
             internal string Title { get; set; }
+        }
+
+        private sealed class WordWindowPickerForm : Form
+        {
+            internal IntPtr SelectedHandle { get; private set; }
+
+            internal bool CloseRequested { get; private set; }
+
+            internal WordWindowPickerForm(IReadOnlyList<WordWindowItem> windows)
+            {
+                Text = "切换窗口";
+                ShowInTaskbar = false;
+                FormBorderStyle = FormBorderStyle.FixedSingle;
+                MaximizeBox = false;
+                MinimizeBox = false;
+                StartPosition = FormStartPosition.Manual;
+                Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
+                BackColor = System.Drawing.Color.White;
+                AutoScaleMode = AutoScaleMode.Dpi;
+
+                int contentWidth = 420;
+                using (System.Drawing.Graphics graphics = CreateGraphics())
+                {
+                    foreach (WordWindowItem item in windows)
+                    {
+                        int measured = (int)Math.Ceiling(graphics.MeasureString(item.Title ?? string.Empty, Font).Width) + 78;
+                        contentWidth = Math.Max(contentWidth, Math.Min(measured, 820));
+                    }
+                }
+
+                TableLayoutPanel list = new TableLayoutPanel
+                {
+                    Dock = DockStyle.Fill,
+                    ColumnCount = 1,
+                    RowCount = windows.Count,
+                    AutoScroll = windows.Count > 10,
+                    Padding = new Padding(6),
+                    BackColor = System.Drawing.Color.White
+                };
+
+                for (int i = 0; i < windows.Count; i++)
+                {
+                    WordWindowItem window = windows[i];
+                    list.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
+                    TableLayoutPanel row = new TableLayoutPanel
+                    {
+                        Dock = DockStyle.Top,
+                        Height = 38,
+                        ColumnCount = 2,
+                        Margin = new Padding(0),
+                        BackColor = i % 2 == 0
+                            ? System.Drawing.Color.White
+                            : System.Drawing.Color.FromArgb(248, 249, 251)
+                    };
+                    row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 38F));
+                    row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+
+                    Button closeButton = new Button
+                    {
+                        Dock = DockStyle.Fill,
+                        Text = "×",
+                        FlatStyle = FlatStyle.Flat,
+                        Margin = new Padding(2),
+                        ForeColor = System.Drawing.Color.FromArgb(90, 96, 106),
+                        BackColor = System.Drawing.Color.Transparent,
+                        Cursor = Cursors.Hand,
+                        TabStop = false
+                    };
+                    closeButton.FlatAppearance.BorderSize = 0;
+                    closeButton.FlatAppearance.MouseOverBackColor = System.Drawing.Color.FromArgb(250, 226, 226);
+                    closeButton.Click += (_, __) => SelectWindow(window.Handle, true);
+
+                    Button documentButton = new Button
+                    {
+                        Dock = DockStyle.Fill,
+                        Text = (i + 1) + " " + window.Title,
+                        TextAlign = System.Drawing.ContentAlignment.MiddleLeft,
+                        AutoEllipsis = true,
+                        FlatStyle = FlatStyle.Flat,
+                        Margin = new Padding(0, 2, 2, 2),
+                        BackColor = System.Drawing.Color.Transparent,
+                        Cursor = Cursors.Hand
+                    };
+                    documentButton.FlatAppearance.BorderSize = 0;
+                    documentButton.FlatAppearance.MouseOverBackColor = System.Drawing.Color.FromArgb(232, 241, 253);
+                    documentButton.Click += (_, __) => SelectWindow(window.Handle, false);
+
+                    row.Controls.Add(closeButton, 0, 0);
+                    row.Controls.Add(documentButton, 1, 0);
+                    list.Controls.Add(row, 0, i);
+                }
+
+                ClientSize = new System.Drawing.Size(contentWidth, Math.Min(windows.Count * 38 + 12, 400));
+                Controls.Add(list);
+
+                System.Drawing.Rectangle workArea = Screen.FromPoint(Cursor.Position).WorkingArea;
+                int x = Math.Min(Cursor.Position.X, workArea.Right - Width);
+                int y = Math.Min(Cursor.Position.Y, workArea.Bottom - Height);
+                Location = new System.Drawing.Point(Math.Max(workArea.Left, x), Math.Max(workArea.Top, y));
+            }
+
+            private void SelectWindow(IntPtr handle, bool closeRequested)
+            {
+                SelectedHandle = handle;
+                CloseRequested = closeRequested;
+                DialogResult = DialogResult.OK;
+                Close();
+            }
         }
         private sealed class WordPerformanceScope : IDisposable
         {
@@ -190,64 +302,43 @@ namespace DocuLint
             }
         }
 
-        private void btnSwitchWindows_ItemsLoading(object sender, RibbonControlEventArgs e)
+        private void btnSwitchWindows_Click(object sender, RibbonControlEventArgs e)
         {
-            if (btnSwitchWindows == null)
-            {
-                return;
-            }
-
-            btnSwitchWindows.Items.Clear();
             List<WordWindowItem> windows = GetOpenWordWindows();
             if (windows.Count == 0)
             {
-                RibbonButton empty = Factory.CreateRibbonButton();
-                empty.Label = "无打开文档";
-                empty.Enabled = false;
-                btnSwitchWindows.Items.Add(empty);
+                MessageBox.Show("当前没有打开的 Word 文档。", "文档管理");
                 return;
             }
 
-            for (int i = 0; i < windows.Count; i++)
+            using (WordWindowPickerForm picker = new WordWindowPickerForm(windows))
             {
-                WordWindowItem window = windows[i];
-                RibbonButton item = Factory.CreateRibbonButton();
-                item.Name = "btnSwitchWindowDoc" + i.ToString();
-                item.Label = (i + 1) + " " + window.Title;
-                item.OfficeImageId = "FileDocument";
-                item.ShowImage = true;
-                item.Click += btnSwitchWindowDocument_Click;
-                btnSwitchWindows.Items.Add(item);
+                if (picker.ShowDialog() != DialogResult.OK || picker.SelectedHandle == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                if (picker.CloseRequested)
+                {
+                    CloseWordDocumentWindow(picker.SelectedHandle);
+                }
+                else
+                {
+                    ActivateWordDocumentWindow(picker.SelectedHandle);
+                }
             }
         }
 
-        private void btnSwitchWindowDocument_Click(object sender, RibbonControlEventArgs e)
+        private static void ActivateWordDocumentWindow(IntPtr handle)
         {
             try
             {
-                if (!(sender is RibbonButton button))
+                if (IsIconic(handle))
                 {
-                    return;
+                    ShowWindow(handle, SwRestore);
                 }
 
-                string digits = new string((button.Name ?? string.Empty).Where(char.IsDigit).ToArray());
-                if (!int.TryParse(digits, out int index))
-                {
-                    return;
-                }
-
-                List<WordWindowItem> windows = GetOpenWordWindows();
-                if (index < 0 || index >= windows.Count)
-                {
-                    return;
-                }
-
-                if (IsIconic(windows[index].Handle))
-                {
-                    ShowWindow(windows[index].Handle, SwRestore);
-                }
-
-                SetForegroundWindow(windows[index].Handle);
+                SetForegroundWindow(handle);
                 TryUpdateStatusBar(Globals.ThisAddIn?.Application, "已切换窗口");
             }
             catch (Exception ex)
@@ -403,7 +494,12 @@ namespace DocuLint
                 return;
             }
 
-            styleGalleryDropDown.Label = "当前样式：" + BuildCurrentStyleGalleryLabel(GetCurrentParagraphStyleName());
+            string currentStyleName = GetCurrentParagraphStyleName();
+            styleGalleryDropDown.Label = "当前样式：" + BuildCurrentStyleGalleryLabel(currentStyleName);
+            styleGalleryDropDown.ScreenTip = "当前样式";
+            styleGalleryDropDown.SuperTip = string.IsNullOrWhiteSpace(currentStyleName)
+                ? "当前段落未读取到样式。"
+                : currentStyleName.Trim();
             SelectOutlineLevelItem(GetCurrentSelectionOutlineLevel());
         }
 
@@ -540,13 +636,49 @@ namespace DocuLint
 
         private static string FormatStyleGalleryLabel(string styleName)
         {
-            const int maxLength = 24;
-            if (string.IsNullOrWhiteSpace(styleName) || styleName.Length <= maxLength)
+            const int maxDisplayWidth = 20;
+            const string ellipsis = "...";
+            if (string.IsNullOrWhiteSpace(styleName))
             {
                 return styleName;
             }
 
-            return styleName.Substring(0, maxLength - 3) + "...";
+            string normalizedName = styleName.Trim();
+            int displayWidth = 0;
+            int endIndex = 0;
+            while (endIndex < normalizedName.Length)
+            {
+                int characterWidth = normalizedName[endIndex] <= 0x7f ? 1 : 2;
+                if (displayWidth + characterWidth > maxDisplayWidth)
+                {
+                    break;
+                }
+
+                displayWidth += characterWidth;
+                endIndex++;
+            }
+
+            if (endIndex == normalizedName.Length)
+            {
+                return normalizedName;
+            }
+
+            int contentWidth = maxDisplayWidth - ellipsis.Length;
+            displayWidth = 0;
+            endIndex = 0;
+            while (endIndex < normalizedName.Length)
+            {
+                int characterWidth = normalizedName[endIndex] <= 0x7f ? 1 : 2;
+                if (displayWidth + characterWidth > contentWidth)
+                {
+                    break;
+                }
+
+                displayWidth += characterWidth;
+                endIndex++;
+            }
+
+            return normalizedName.Substring(0, endIndex) + ellipsis;
         }
 
         private static string BuildCurrentStyleGalleryLabel(string styleName)
@@ -748,14 +880,8 @@ namespace DocuLint
                 {
                     try
                     {
-                        string linkedStyle = GetLinkedStyleForOutlineLevel(level);
                         paragraph.OutlineLevel = outlineLevel;
                         paragraph.Range.ParagraphFormat.OutlineLevel = outlineLevel;
-                        if (!string.IsNullOrWhiteSpace(linkedStyle) && TrySetStyle(paragraph.Range, linkedStyle))
-                        {
-                            paragraph.OutlineLevel = outlineLevel;
-                            paragraph.Range.ParagraphFormat.OutlineLevel = outlineLevel;
-                        }
                     }
                     catch
                     {
@@ -769,120 +895,6 @@ namespace DocuLint
             catch (Exception ex)
             {
                 MessageBox.Show($"设置大纲级别失败: {ex.Message}", "文档不加班");
-            }
-        }
-
-        private void btnStyleBinding_Click(object sender, RibbonControlEventArgs e)
-        {
-            ShowStyleBindingDialog();
-        }
-
-        private void ShowStyleBindingDialog()
-        {
-            try
-            {
-                Word.Document activeDoc = null;
-                try
-                {
-                    activeDoc = Globals.ThisAddIn?.Application?.ActiveDocument;
-                }
-                catch
-                {
-                }
-
-                List<string> styleNames = GetInitialStyleNamesForBinding();
-
-                using (StyleLinkSettingsForm form = new StyleLinkSettingsForm(
-                    outlineLevelStyleLinks,
-                    styleNames,
-                    () => GetCachedDocumentStyleNames(activeDoc),
-                    GetCustomStyleNamesForBinding(),
-                    outlineNumberPattern,
-                    outlineNumberTextSpacing,
-                    styleDefinitions.Values))
-                {
-                    if (form.ShowDialog() != DialogResult.OK)
-                    {
-                        return;
-                    }
-
-                    outlineLevelStyleLinks.Clear();
-                    foreach (KeyValuePair<int, string> item in form.StyleLinks)
-                    {
-                        if (!string.IsNullOrWhiteSpace(item.Value))
-                        {
-                            outlineLevelStyleLinks[item.Key] = item.Value;
-                        }
-                    }
-                    outlineNumberPattern = form.NumberPattern;
-                    outlineNumberTextSpacing = form.NumberTextSpacing;
-                    SaveStyleDefinitions(form.StyleDefinitions);
-
-                    ApplyStyleLinksToCurrentDocument(activeDoc);
-                    InitializeStyleGalleriesLightweight();
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"打开样式绑定面板失败: {ex.Message}", "文档不加班");
-            }
-        }
-
-        private List<string> GetInitialStyleNamesForBinding()
-        {
-            return outlineLevelStyleLinks.Values
-                .Concat(new[] { GetCurrentParagraphStyleName() })
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Distinct(StringComparer.CurrentCultureIgnoreCase)
-                .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
-                .ToList();
-        }
-
-        private static List<string> GetCustomStyleNamesForBinding()
-        {
-            EnsureStyleDefinitionsInitialized();
-            return styleDefinitions.Values
-                .Select(definition => definition.StyleName)
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Distinct(StringComparer.CurrentCultureIgnoreCase)
-                .ToList();
-        }
-
-        private List<string> GetCachedDocumentStyleNames(Word.Document doc)
-        {
-            string key = GetDocumentCacheKey(doc);
-            if (!string.IsNullOrWhiteSpace(key) && documentStyleNamesCache.TryGetValue(key, out List<string> cached))
-            {
-                return cached;
-            }
-
-            List<string> styles = GetDocumentStyleNames(doc).ToList();
-            if (!string.IsNullOrWhiteSpace(key))
-            {
-                documentStyleNamesCache[key] = styles;
-            }
-
-            return styles;
-        }
-
-        private static string GetDocumentCacheKey(Word.Document doc)
-        {
-            try
-            {
-                return string.IsNullOrWhiteSpace(doc?.FullName) ? doc?.Name ?? string.Empty : doc.FullName;
-            }
-            catch
-            {
-                return string.Empty;
-            }
-        }
-
-        private void InvalidateDocumentStyleCache(Word.Document doc)
-        {
-            string key = GetDocumentCacheKey(doc);
-            if (!string.IsNullOrWhiteSpace(key))
-            {
-                documentStyleNamesCache.Remove(key);
             }
         }
 
@@ -937,7 +949,6 @@ namespace DocuLint
                         }
                     }
 
-                    InvalidateDocumentStyleCache(doc);
                     InitializeStyleGalleriesLightweight();
                     TryUpdateStatusBar(app, "自定义样式已创建");
                     MessageBox.Show("所选自定义样式已应用到当前文档。", "创建自定义样式");
@@ -1069,197 +1080,6 @@ namespace DocuLint
             }
 
             return StyleDefinitionRequest.CreateDefaultSet().FirstOrDefault(item => item.Level == level);
-        }
-
-        private static string GetLinkedStyleForOutlineLevel(int level)
-        {
-            return outlineLevelStyleLinks.TryGetValue(level, out string styleName)
-                ? styleName
-                : string.Empty;
-        }
-
-        private static int GetOutlineLevelForLinkedStyle(string styleName)
-        {
-            if (string.IsNullOrWhiteSpace(styleName))
-            {
-                return 0;
-            }
-
-            foreach (KeyValuePair<int, string> item in outlineLevelStyleLinks)
-            {
-                if (string.Equals(item.Value, styleName, StringComparison.CurrentCultureIgnoreCase))
-                {
-                    return item.Key;
-                }
-            }
-
-            return 0;
-        }
-
-        private void ApplyStyleLinksToCurrentDocument(Word.Document doc)
-        {
-            if (doc == null || outlineLevelStyleLinks.Count == 0)
-            {
-                return;
-            }
-
-            Word.Application app = Globals.ThisAddIn?.Application;
-            HashSet<int> updatedStarts = new HashSet<int>();
-            List<Word.Paragraph> updatedHeadingParagraphs = new List<Word.Paragraph>();
-            try
-            {
-                using (new WordPerformanceScope(app))
-                {
-                    ConfigureLinkedStyleOutlineLevels(doc);
-
-                    HashSet<int> linkedOutlineLevels = new HashSet<int>(
-                        outlineLevelStyleLinks.Keys.Where(level => level >= 1 && level <= 9));
-                    foreach (Word.Range headingRange in CollectOutlineRangesByFind(
-                        doc,
-                        linkedOutlineLevels,
-                        doc.Content.Start,
-                        doc.Content.End))
-                    {
-                        Word.Paragraph paragraph = GetHostParagraph(headingRange);
-                        if (paragraph?.Range == null || !updatedStarts.Add(paragraph.Range.Start))
-                        {
-                            continue;
-                        }
-
-                        ApplyLinkedStyleToParagraph(paragraph);
-                        int level = GetParagraphOutlineLevel(paragraph);
-                        if (level >= 1 && level <= 6)
-                        {
-                            updatedHeadingParagraphs.Add(paragraph);
-                        }
-                    }
-
-                    if (updatedHeadingParagraphs.Count > 0)
-                    {
-                        AutoUpdateOutlineListForParagraphs(updatedHeadingParagraphs);
-                    }
-                }
-
-                app?.ScreenRefresh();
-                RefreshCurrentStyleIndicator();
-                TryUpdateStatusBar(app, "样式绑定已更新");
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"应用样式绑定失败: {ex.Message}", "文档不加班");
-            }
-        }
-
-        private static void ConfigureLinkedStyleOutlineLevels(Word.Document doc)
-        {
-            if (doc == null)
-            {
-                return;
-            }
-
-            foreach (KeyValuePair<int, string> item in outlineLevelStyleLinks)
-            {
-                SetStyleOutlineLevel(doc, item.Value, item.Key);
-            }
-        }
-
-        private static void SetStyleOutlineLevel(Word.Document doc, string styleName, int level)
-        {
-            if (doc == null || string.IsNullOrWhiteSpace(styleName))
-            {
-                return;
-            }
-
-            try
-            {
-                object key = styleName;
-                Word.Style style = doc.Styles[key];
-                if (style == null)
-                {
-                    return;
-                }
-
-                style.ParagraphFormat.OutlineLevel = level == 10
-                    ? Word.WdOutlineLevel.wdOutlineLevelBodyText
-                    : (Word.WdOutlineLevel)level;
-            }
-            catch
-            {
-            }
-        }
-
-        private static void ApplyLinkedOutlineLevelToSelection(Word.Selection selection, string styleName)
-        {
-            int level = GetOutlineLevelForLinkedStyle(styleName);
-            if ((level < 1 || level > 9) && level != 10)
-            {
-                return;
-            }
-
-            Word.WdOutlineLevel outlineLevel = level == 10
-                ? Word.WdOutlineLevel.wdOutlineLevelBodyText
-                : (Word.WdOutlineLevel)level;
-
-            try
-            {
-                Word.Paragraphs paragraphs = selection?.Range?.Paragraphs;
-                if (paragraphs == null)
-                {
-                    return;
-                }
-
-                foreach (Word.Paragraph paragraph in paragraphs)
-                {
-                    try
-                    {
-                        paragraph.OutlineLevel = outlineLevel;
-                        paragraph.Range.ParagraphFormat.OutlineLevel = outlineLevel;
-                    }
-                    catch
-                    {
-                    }
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        private static void ApplyLinkedStyleToParagraph(Word.Paragraph paragraph)
-        {
-            if (paragraph?.Range == null)
-            {
-                return;
-            }
-
-            int level = GetParagraphOutlineLevel(paragraph);
-            if (level == 0)
-            {
-                try
-                {
-                    level = paragraph.OutlineLevel == Word.WdOutlineLevel.wdOutlineLevelBodyText ? 10 : 0;
-                }
-                catch
-                {
-                    level = 0;
-                }
-            }
-
-            string linkedStyle = GetLinkedStyleForOutlineLevel(level);
-            if (string.IsNullOrWhiteSpace(linkedStyle))
-            {
-                return;
-            }
-
-            Word.WdOutlineLevel outlineLevel = level == 10
-                ? Word.WdOutlineLevel.wdOutlineLevelBodyText
-                : (Word.WdOutlineLevel)level;
-
-            if (TrySetStyle(paragraph.Range, linkedStyle))
-            {
-                paragraph.OutlineLevel = outlineLevel;
-                paragraph.Range.ParagraphFormat.OutlineLevel = outlineLevel;
-            }
         }
 
         private static bool TrySetStyle(object target, string styleName)
@@ -1430,6 +1250,291 @@ namespace DocuLint
         private void DisposeRuntimeResources()
         {
             LoadedInstances.Remove(this);
+            if (LoadedInstances.Count == 0)
+            {
+                CancelStyleBrush(false);
+            }
+        }
+
+        private static void CloseWordDocumentWindow(IntPtr handle)
+        {
+            Word.Application app = Globals.ThisAddIn?.Application;
+            Word.Windows wordWindows = null;
+            Word.Window targetWindow = null;
+            Word.Document targetDocument = null;
+            try
+            {
+                wordWindows = app?.Windows;
+                int count = wordWindows?.Count ?? 0;
+                for (int i = 1; i <= count; i++)
+                {
+                    Word.Window candidate = wordWindows[i];
+                    if (candidate != null && new IntPtr(candidate.Hwnd) == handle)
+                    {
+                        targetWindow = candidate;
+                        break;
+                    }
+
+                    if (candidate != null)
+                    {
+                        Marshal.ReleaseComObject(candidate);
+                    }
+                }
+
+                if (targetWindow == null)
+                {
+                    MessageBox.Show("所选文档窗口已经关闭。", "文档管理");
+                    return;
+                }
+
+                targetDocument = targetWindow.Document;
+                string documentName = GetDocumentDisplayName(targetDocument);
+                targetDocument.Close(Word.WdSaveOptions.wdPromptToSaveChanges);
+                TryUpdateStatusBar(app, "已关闭 " + documentName);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"关闭文档失败: {ex.Message}", "文档管理");
+            }
+            finally
+            {
+                if (targetDocument != null)
+                {
+                    Marshal.ReleaseComObject(targetDocument);
+                }
+
+                if (targetWindow != null)
+                {
+                    Marshal.ReleaseComObject(targetWindow);
+                }
+
+                if (wordWindows != null)
+                {
+                    Marshal.ReleaseComObject(wordWindows);
+                }
+            }
+        }
+
+        private void btnPersistentStyleBrush_Click(object sender, RibbonControlEventArgs e)
+        {
+            ToggleStyleBrush();
+        }
+
+        internal static void HandleStyleBrushSelectionChange(Word.Selection selection)
+        {
+            if (!styleBrushActive || styleBrushApplying || selection?.Range == null)
+            {
+                return;
+            }
+
+            string documentKey = GetStyleBrushDocumentKey(selection.Document);
+            if (!string.Equals(documentKey, styleBrushSourceDocumentKey, StringComparison.OrdinalIgnoreCase))
+            {
+                CancelStyleBrush(false);
+                return;
+            }
+
+            int start;
+            int end;
+            try
+            {
+                start = selection.Range.Start;
+                end = selection.Range.End;
+            }
+            catch
+            {
+                return;
+            }
+
+            if (start == styleBrushSourceStart && end == styleBrushSourceEnd)
+            {
+                return;
+            }
+
+            // 导航窗格也会移动 Word 插入点。只有鼠标位于正文插入点附近时，
+            // 才把折叠选区视为一次正文格式刷操作。
+            if (start == end && !IsMouseNearStyleBrushSelection(selection))
+            {
+                return;
+            }
+
+            styleBrushApplying = true;
+            try
+            {
+                selection.PasteFormat();
+                if (styleBrushPersistent)
+                {
+                    SetStyleBrushStatus("格式刷已锁定，可继续选择目标内容；再次点击格式刷或按 Esc 退出。");
+                }
+                else
+                {
+                    CancelStyleBrush(false);
+                }
+            }
+            catch
+            {
+                CancelStyleBrush(false);
+            }
+            finally
+            {
+                styleBrushApplying = false;
+            }
+        }
+
+        internal static void HandleStyleBrushWindowActivated(Word.Document document)
+        {
+            if (!styleBrushActive)
+            {
+                return;
+            }
+
+            string documentKey = GetStyleBrushDocumentKey(document);
+            if (!string.Equals(documentKey, styleBrushSourceDocumentKey, StringComparison.OrdinalIgnoreCase))
+            {
+                CancelStyleBrush(false);
+            }
+        }
+
+        private static void ToggleStyleBrush()
+        {
+            Word.Application app = Globals.ThisAddIn?.Application;
+            Word.Selection selection = app?.Selection;
+            if (selection?.Range == null)
+            {
+                return;
+            }
+
+            long nowTicks = DateTime.UtcNow.Ticks;
+            long elapsedTicks = nowTicks - styleBrushLastClickTicks;
+            long doubleClickTicks = TimeSpan.FromMilliseconds(SystemInformation.DoubleClickTime).Ticks;
+            bool secondClick = styleBrushActive
+                && elapsedTicks >= 0
+                && elapsedTicks <= doubleClickTicks;
+
+            if (secondClick)
+            {
+                styleBrushPersistent = true;
+                styleBrushLastClickTicks = 0;
+                SetStyleBrushVisualState(true);
+                SetStyleBrushStatus("格式刷已锁定，可连续应用格式；再次点击格式刷或按 Esc 退出。");
+                return;
+            }
+
+            if (styleBrushActive)
+            {
+                CancelStyleBrush(true);
+                return;
+            }
+
+            try
+            {
+                selection.CopyFormat();
+                styleBrushSourceDocumentKey = GetStyleBrushDocumentKey(selection.Document);
+                styleBrushSourceStart = selection.Range.Start;
+                styleBrushSourceEnd = selection.Range.End;
+                styleBrushPersistent = false;
+                styleBrushActive = true;
+                styleBrushLastClickTicks = nowTicks;
+                SetStyleBrushVisualState(false);
+                EnsureStopShortcutHook();
+                SetStyleBrushStatus("格式刷已启用，请选择要应用格式的内容。");
+            }
+            catch (Exception ex)
+            {
+                CancelStyleBrush(false);
+                MessageBox.Show($"启动格式刷失败: {ex.Message}", "文档不加班");
+            }
+        }
+
+        private static void CancelStyleBrush(bool showStatus)
+        {
+            bool wasActive = styleBrushActive;
+            styleBrushActive = false;
+            styleBrushPersistent = false;
+            styleBrushLastClickTicks = 0;
+            styleBrushSourceDocumentKey = string.Empty;
+            styleBrushSourceStart = -1;
+            styleBrushSourceEnd = -1;
+            SetStyleBrushVisualState(false);
+            if (showStatus && wasActive)
+            {
+                SetStyleBrushStatus("格式刷已取消。");
+            }
+        }
+
+        private static string GetStyleBrushDocumentKey(Word.Document document)
+        {
+            try
+            {
+                return !string.IsNullOrWhiteSpace(document?.FullName)
+                    ? document.FullName
+                    : document?.Name ?? string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static bool IsMouseNearStyleBrushSelection(Word.Selection selection)
+        {
+            try
+            {
+                int left;
+                int top;
+                int width;
+                int height;
+                selection.Application.ActiveWindow.GetPoint(
+                    out left,
+                    out top,
+                    out width,
+                    out height,
+                    selection.Range);
+
+                var cursor = Cursor.Position;
+                const int horizontalTolerance = 18;
+                const int verticalTolerance = 10;
+                return cursor.X >= left - horizontalTolerance
+                    && cursor.X <= left + Math.Max(width, 2) + horizontalTolerance
+                    && cursor.Y >= top - verticalTolerance
+                    && cursor.Y <= top + Math.Max(height, 16) + verticalTolerance;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void SetStyleBrushStatus(string message)
+        {
+            try
+            {
+                Word.Application app = Globals.ThisAddIn?.Application;
+                if (app != null)
+                {
+                    app.StatusBar = message;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static void SetStyleBrushVisualState(bool locked)
+        {
+            foreach (Ribbon1 ribbon in LoadedInstances.ToArray())
+            {
+                try
+                {
+                    if (ribbon?.btnStyleBrush != null)
+                    {
+                        ribbon.btnStyleBrush.Checked = locked;
+                    }
+                }
+                catch
+                {
+                }
+            }
         }
 
         private static void TryUpdateStatusBar(Word.Application app, string styleName)
@@ -1521,6 +1626,7 @@ namespace DocuLint
                 int keyCode = Marshal.ReadInt32(lParam);
                 if (keyCode == VkEscape)
                 {
+                    CancelStyleBrush(true);
                     RequestOperationCancellation();
                 }
                 else if (keyCode == VkA && IsKeyDown(VkControl) && IsKeyDown(VkMenu))

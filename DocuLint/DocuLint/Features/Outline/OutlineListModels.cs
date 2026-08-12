@@ -49,6 +49,5 @@ namespace DocuLint
 
         public long DurationMilliseconds { get; set; }
 
-        public Dictionary<int, string> LinkedStyles { get; set; }
     }
 }
