@@ -2083,7 +2083,8 @@ namespace DocuLint
                 MultiSelect = false,
                 ReadOnly = !includeCheckColumn,
                 RowHeadersVisible = false,
-                RowTemplate = { Height = 30 },
+                RowTemplate = { Height = 32 },
+                ScrollBars = ScrollBars.Both,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect
             };
 
@@ -2103,12 +2104,20 @@ namespace DocuLint
                 {
                     Name = "Mapped",
                     HeaderText = "追踪",
-                    Width = 54,
-                    MinimumWidth = 42,
+                    Width = 58,
+                    MinimumWidth = 50,
                     AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
                     ReadOnly = false,
                     Resizable = DataGridViewTriState.False,
-                    SortMode = DataGridViewColumnSortMode.NotSortable
+                    SortMode = DataGridViewColumnSortMode.NotSortable,
+                    FlatStyle = FlatStyle.Standard,
+                    CellTemplate = new VisibleCheckBoxCell()
+                };
+                mappedColumn.DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    Alignment = DataGridViewContentAlignment.MiddleCenter,
+                    NullValue = false,
+                    Padding = new Padding(2, 0, 2, 0)
                 };
                 grid.Columns.Add(mappedColumn);
                 mappedColumn.Frozen = true;
@@ -2119,6 +2128,79 @@ namespace DocuLint
             grid.Columns.Add(CreateRequirementTextColumn("Name", "需求名称", 50f, 140));
             grid.Columns.Add(CreateRequirementTextColumn("SectionNumber", "章节号", 20f, 78));
             return grid;
+        }
+
+        private sealed class VisibleCheckBoxCell : DataGridViewCheckBoxCell
+        {
+            protected override void Paint(
+                Graphics graphics,
+                Rectangle clipBounds,
+                Rectangle cellBounds,
+                int rowIndex,
+                DataGridViewElementStates cellState,
+                object value,
+                object formattedValue,
+                string errorText,
+                DataGridViewCellStyle cellStyle,
+                DataGridViewAdvancedBorderStyle advancedBorderStyle,
+                DataGridViewPaintParts paintParts)
+            {
+                base.Paint(
+                    graphics,
+                    clipBounds,
+                    cellBounds,
+                    rowIndex,
+                    cellState,
+                    value,
+                    formattedValue,
+                    errorText,
+                    cellStyle,
+                    advancedBorderStyle,
+                    paintParts);
+
+                float dpiScale = Math.Max(1f, graphics.DpiX / 96f);
+                int preferredSize = (int)Math.Round(16f * dpiScale);
+                int minimumSize = (int)Math.Round(14f * dpiScale);
+                int inset = (int)Math.Round(8f * dpiScale);
+                int size = Math.Min(preferredSize, Math.Max(minimumSize, Math.Min(cellBounds.Width, cellBounds.Height) - inset));
+                Rectangle box = new Rectangle(
+                    cellBounds.X + (cellBounds.Width - size) / 2,
+                    cellBounds.Y + (cellBounds.Height - size) / 2,
+                    size - 1,
+                    size - 1);
+                bool selected = (cellState & DataGridViewElementStates.Selected) != 0;
+                Color borderColor = selected ? Color.FromArgb(38, 90, 166) : Color.FromArgb(95, 105, 118);
+                Color fillColor = selected ? Color.FromArgb(245, 249, 255) : Color.White;
+                using (Brush fill = new SolidBrush(fillColor))
+                using (Pen border = new Pen(borderColor, Math.Max(1f, dpiScale)))
+                {
+                    graphics.FillRectangle(fill, box);
+                    graphics.DrawRectangle(border, box);
+                }
+
+                bool isChecked;
+                try
+                {
+                    isChecked = Convert.ToBoolean(value ?? false);
+                }
+                catch
+                {
+                    isChecked = false;
+                }
+
+                if (isChecked)
+                {
+                    using (Pen check = new Pen(Color.FromArgb(38, 90, 166), Math.Max(2f, 2f * dpiScale)))
+                    {
+                        check.StartCap = System.Drawing.Drawing2D.LineCap.Round;
+                        check.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+                        Point p1 = new Point(box.Left + 3, box.Top + box.Height / 2);
+                        Point p2 = new Point(box.Left + box.Width / 2 - 1, box.Bottom - 3);
+                        Point p3 = new Point(box.Right - 3, box.Top + 3);
+                        graphics.DrawLines(check, new[] { p1, p2, p3 });
+                    }
+                }
+            }
         }
 
         private void RestoreTargetSelection(DataGridView grid)

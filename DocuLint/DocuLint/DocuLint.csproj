@@ -39,7 +39,7 @@
     <PublishUrl>E:\my_VSTO\搞快点发布\</PublishUrl>
     <InstallUrl />
     <TargetCulture>zh-chs</TargetCulture>
-    <ApplicationVersion>0.0.1.5</ApplicationVersion>
+    <ApplicationVersion>0.0.1.6</ApplicationVersion>
     <AutoIncrementApplicationRevision>true</AutoIncrementApplicationRevision>
     <UpdateEnabled>false</UpdateEnabled>
     <UpdateInterval>0</UpdateInterval>
