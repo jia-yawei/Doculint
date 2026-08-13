@@ -326,7 +326,7 @@ namespace DocuLint
             {
                 requirementTrackingTaskPane = CustomTaskPanes.Add(requirementTrackingConsoleControl, "需求追踪控制台");
                 requirementTrackingTaskPane.DockPosition = Office.MsoCTPDockPosition.msoCTPDockPositionRight;
-                requirementTrackingTaskPane.Width = 1500;
+                requirementTrackingTaskPane.Width = GetInitialTaskPaneWidth(0.42, 760, 1300);
             }
         }
 
@@ -389,7 +389,7 @@ namespace DocuLint
 
             CustomTaskPane taskPane = CustomTaskPanes.Add(control, "需求提取", activeWindow);
             taskPane.DockPosition = Office.MsoCTPDockPosition.msoCTPDockPositionRight;
-            taskPane.Width = 780;
+            taskPane.Width = GetInitialTaskPaneWidth(0.30, 480, 900);
 
             RequirementExtractionPaneContext context = new RequirementExtractionPaneContext
             {
@@ -402,6 +402,20 @@ namespace DocuLint
                 HandleRequirementExtractionPaneVisibleChanged(context);
             requirementExtractionPanes[windowKey] = context;
             SetActiveRequirementExtractionPane(context);
+        }
+
+        private static int GetInitialTaskPaneWidth(double screenRatio, int minimum, int maximum)
+        {
+            try
+            {
+                int screenWidth = Screen.PrimaryScreen?.WorkingArea.Width ?? maximum;
+                int width = (int)Math.Round(screenWidth * screenRatio);
+                return Math.Max(minimum, Math.Min(maximum, width));
+            }
+            catch
+            {
+                return maximum;
+            }
         }
 
         private void HandleRequirementExtractionPaneVisibleChanged(

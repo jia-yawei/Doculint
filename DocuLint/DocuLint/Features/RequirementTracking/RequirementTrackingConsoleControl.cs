@@ -94,15 +94,16 @@ namespace DocuLint
                 RowCount = 3,
                 Padding = new Padding(6)
             };
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 82f));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             FlowLayoutPanel header = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
+                WrapContents = true,
+                AutoScroll = true,
                 Margin = new Padding(0, 0, 0, 4)
             };
             btnExportTable = CreatePrimaryButton("导出追踪表");
@@ -129,13 +130,13 @@ namespace DocuLint
                 Margin = new Padding(0),
                 Padding = new Padding(0, 2, 0, 2)
             };
-            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 96f));
-            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 172f));
-            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 124f));
-            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 156f));
-            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            documentOptions.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
-            documentOptions.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
+            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 14f));
+            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22f));
+            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 16f));
+            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20f));
+            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 28f));
+            documentOptions.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            documentOptions.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             lblTraceTemplate = CreateToolbarLabel("追踪模板");
             ConfigureOptionLabel(lblTraceTemplate);
@@ -211,7 +212,8 @@ namespace DocuLint
 
             txtTargetSearch = new TextBox
             {
-                Width = 220,
+                Width = 160,
+                MinimumSize = new Size(90, 0),
                 Margin = new Padding(6, 4, 0, 0)
             };
             txtTargetSearch.TextChanged += (_, __) => RenderTargets();
@@ -2092,19 +2094,25 @@ namespace DocuLint
 
             if (includeCheckColumn)
             {
-                grid.Columns.Add(new DataGridViewCheckBoxColumn
+                DataGridViewCheckBoxColumn mappedColumn = new DataGridViewCheckBoxColumn
                 {
                     Name = "Mapped",
                     HeaderText = "追踪",
                     Width = 54,
+                    MinimumWidth = 42,
                     AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
-                    ReadOnly = false
-                });
+                    ReadOnly = false,
+                    Resizable = DataGridViewTriState.False,
+                    SortMode = DataGridViewColumnSortMode.NotSortable
+                };
+                grid.Columns.Add(mappedColumn);
+                mappedColumn.Frozen = true;
+                mappedColumn.DisplayIndex = 0;
             }
 
-            grid.Columns.Add(CreateRequirementTextColumn("Id", "需求标识", 30f));
-            grid.Columns.Add(CreateRequirementTextColumn("Name", "需求名称", 50f));
-            grid.Columns.Add(CreateRequirementTextColumn("SectionNumber", "章节号", 20f));
+            grid.Columns.Add(CreateRequirementTextColumn("Id", "需求标识", 30f, 110));
+            grid.Columns.Add(CreateRequirementTextColumn("Name", "需求名称", 50f, 140));
+            grid.Columns.Add(CreateRequirementTextColumn("SectionNumber", "章节号", 20f, 78));
             return grid;
         }
 
@@ -2135,7 +2143,11 @@ namespace DocuLint
             }
         }
 
-        private static DataGridViewTextBoxColumn CreateRequirementTextColumn(string name, string headerText, float fillWeight)
+        private static DataGridViewTextBoxColumn CreateRequirementTextColumn(
+            string name,
+            string headerText,
+            float fillWeight,
+            int minimumWidth)
         {
             return new DataGridViewTextBoxColumn
             {
@@ -2143,6 +2155,7 @@ namespace DocuLint
                 HeaderText = headerText,
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 FillWeight = fillWeight,
+                MinimumWidth = minimumWidth,
                 ReadOnly = true,
                 DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleCenter },
                 SortMode = DataGridViewColumnSortMode.NotSortable

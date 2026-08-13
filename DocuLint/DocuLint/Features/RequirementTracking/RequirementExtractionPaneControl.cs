@@ -44,6 +44,8 @@ namespace DocuLint
             this.applicationAccessor = applicationAccessor;
             Dock = DockStyle.Fill;
             BackColor = Color.White;
+            AutoScaleMode = AutoScaleMode.Dpi;
+            AutoScaleDimensions = new SizeF(96F, 96F);
             toolTip = new ToolTip
             {
                 InitialDelay = 350,
@@ -74,7 +76,7 @@ namespace DocuLint
             Panel toolbar = new Panel
             {
                 Dock = DockStyle.Fill,
-                AutoScroll = false
+                AutoScroll = true
             };
             EnableDoubleBuffering(toolbar);
 
@@ -86,13 +88,13 @@ namespace DocuLint
                 ColumnCount = 7,
                 RowCount = 1
             };
-            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 132f));
-            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 96f));
-            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180f));
-            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 108f));
-            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80f));
-            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 128f));
+            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 15f));
+            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 12f));
+            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
+            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 15f));
+            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 8f));
+            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 10f));
+            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 15f));
 
             FlowLayoutPanel modeActions = new FlowLayoutPanel
             {
