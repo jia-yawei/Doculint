@@ -801,16 +801,83 @@ namespace DocuLint
 
         private static void DeleteSavedRequirementParts(Word.Document doc)
         {
-            foreach (Office.CustomXMLPart part in FindSavedRequirementParts(doc))
+            List<string> partIds = FindSavedRequirementPartIds(doc);
+            foreach (string partId in partIds)
             {
                 try
                 {
-                    part.Delete();
+                    Office.CustomXMLPart part = FindSavedRequirementPartById(doc, partId);
+                    part?.Delete();
                 }
                 catch
                 {
                 }
             }
+
+            // Word can refresh the COM collection after a delete. Repeat a bounded
+            // cleanup pass so a stale duplicate cannot survive the next save.
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                List<string> remaining = FindSavedRequirementPartIds(doc);
+                if (remaining.Count == 0)
+                {
+                    return;
+                }
+
+                foreach (string partId in remaining)
+                {
+                    try
+                    {
+                        FindSavedRequirementPartById(doc, partId)?.Delete();
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+        }
+
+        private static List<string> FindSavedRequirementPartIds(Word.Document doc)
+        {
+            return FindSavedRequirementParts(doc)
+                .Select(part =>
+                {
+                    try
+                    {
+                        return part?.Id ?? string.Empty;
+                    }
+                    catch
+                    {
+                        return string.Empty;
+                    }
+                })
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static Office.CustomXMLPart FindSavedRequirementPartById(Word.Document doc, string partId)
+        {
+            if (doc == null || string.IsNullOrWhiteSpace(partId))
+            {
+                return null;
+            }
+
+            foreach (Office.CustomXMLPart part in FindSavedRequirementParts(doc))
+            {
+                try
+                {
+                    if (string.Equals(part.Id, partId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return part;
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return null;
         }
 
         private static Office.CustomXMLPart FindSavedRequirementPart(Word.Document doc)
