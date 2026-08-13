@@ -389,7 +389,7 @@ namespace DocuLint
 
             CustomTaskPane taskPane = CustomTaskPanes.Add(control, "需求提取", activeWindow);
             taskPane.DockPosition = Office.MsoCTPDockPosition.msoCTPDockPositionRight;
-            taskPane.Width = GetInitialTaskPaneWidth(0.30, 480, 1100);
+            taskPane.Width = GetInitialTaskPaneWidth(0.34, 540, 1100);
 
             RequirementExtractionPaneContext context = new RequirementExtractionPaneContext
             {

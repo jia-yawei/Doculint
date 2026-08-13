@@ -100,10 +100,11 @@ namespace DocuLint
 
             FlowLayoutPanel header = new FlowLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = true,
-                AutoScroll = true,
                 Margin = new Padding(0, 0, 0, 4)
             };
             btnExportTable = CreatePrimaryButton("导出追踪表");
@@ -124,7 +125,9 @@ namespace DocuLint
 
             TableLayoutPanel documentOptions = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 5,
                 RowCount = 2,
                 Margin = new Padding(0),
@@ -162,7 +165,9 @@ namespace DocuLint
             lblCustomTargetTitle.Visible = false;
             FlowLayoutPanel customTitles = new FlowLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
                 Margin = new Padding(0)
@@ -1996,9 +2001,9 @@ namespace DocuLint
             {
                 Dock = DockStyle.Fill,
                 Text = text,
-                Height = 36,
+                Height = 32,
                 Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold, GraphicsUnit.Point),
-                Margin = new Padding(4, 6, 0, 6),
+                Margin = new Padding(0, 4, 6, 4),
                 UseVisualStyleBackColor = false,
                 BackColor = Color.FromArgb(42, 122, 226),
                 ForeColor = Color.White,
