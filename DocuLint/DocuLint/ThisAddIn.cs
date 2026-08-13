@@ -370,6 +370,7 @@ namespace DocuLint
 
             RequirementExtractionPaneControl control =
                 new RequirementExtractionPaneControl(() => Application);
+            control.LoadSavedRequirementsFromCurrentDocument();
             control.RequirementActivated += NavigateToStart;
             control.BatchExtractionModeChanged += enabled =>
             {

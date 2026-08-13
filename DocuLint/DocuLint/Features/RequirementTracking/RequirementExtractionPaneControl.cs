@@ -107,8 +107,8 @@ namespace DocuLint
             toolbar.Controls.Add(primaryActions);
             toolbar.Controls.Add(modeActions);
 
-            btnRefresh = CreateButton("加载标识");
-            btnRefresh.Click += (_, __) => LoadCurrentDocumentRequirements();
+            btnRefresh = CreateButton("重新加载");
+            btnRefresh.Click += (_, __) => ReloadCurrentDocumentRequirements();
             chkMarkerFilterEnabled = new CheckBox
             {
                 AutoSize = true,
@@ -160,7 +160,7 @@ namespace DocuLint
             PlaceToolbarButton(btnExtractionEnabled, modeActions, 100);
             PlaceToolbarButton(btnBatchExtraction, modeActions, 156);
             PlaceToolbarButton(btnClearAll, modeActions, 100);
-            toolTip.SetToolTip(btnRefresh, "从当前 Word 文档加载需求标识");
+            toolTip.SetToolTip(btnRefresh, "按当前过滤规则重新扫描文档，并恢复之前删除的标识");
             toolTip.SetToolTip(chkMarkerFilterEnabled, "启用后，仅加载符合过滤规则的标识");
             toolTip.SetToolTip(txtMarkerIdentifiers, "最多输入 3 种标识，例如 SRS SDS SDD；多个标识之间使用空格");
             toolTip.SetToolTip(btnExtractionEnabled, "开启后，在文档中选中文字可进行提取");
@@ -241,7 +241,35 @@ namespace DocuLint
             Controls.Add(layout);
         }
 
-        internal void LoadCurrentDocumentRequirements()
+        internal void LoadSavedRequirementsFromCurrentDocument()
+        {
+            Word.Document doc = applicationAccessor?.Invoke()?.ActiveDocument;
+            if (doc == null)
+            {
+                SetStatus("当前没有活动文档");
+                return;
+            }
+
+            currentDocument = doc;
+            requirements.Clear();
+            excludedRequirementIds.Clear();
+            requirements.AddRange(LoadSavedRequirementItems(doc));
+            excludedRequirementIds.UnionWith(LoadExcludedRequirementIds(doc));
+            RenderRows();
+            hasUnsavedChanges = false;
+            ApplyBatchExtractionState(batchExtractionEnabled);
+            if (requirements.Count > 0)
+            {
+                SetStatus($"已显示文档中保存的 {requirements.Count} 个需求标识；点击“重新加载”可重新扫描文档");
+                SelectRow(0);
+            }
+            else
+            {
+                SetStatus("当前文档没有已保存的需求提取结果；点击“重新加载”扫描标识");
+            }
+        }
+
+        internal void ReloadCurrentDocumentRequirements()
         {
             Word.Application app = applicationAccessor?.Invoke();
             Word.Document doc = app?.ActiveDocument;
@@ -277,13 +305,12 @@ namespace DocuLint
                 DocumentMarkerCollectionResult markerResult = DocumentMarkerService.CollectMarkers(
                     doc,
                     markerIdentifiers);
+                Dictionary<string, RequirementItem> saved = LoadSavedRequirements(doc);
                 requirements.Clear();
                 excludedRequirementIds.Clear();
-                excludedRequirementIds.UnionWith(LoadExcludedRequirementIds(doc));
                 requirements.AddRange((markerResult.Entries ?? new List<NavigationPaneEntry>())
                     .Where(entry => entry != null &&
-                                    !string.IsNullOrWhiteSpace(entry.Text) &&
-                                    !excludedRequirementIds.Contains(entry.Text))
+                                    !string.IsNullOrWhiteSpace(entry.Text))
                     .Select(entry => new RequirementItem
                     {
                         Id = entry.Text,
@@ -292,10 +319,9 @@ namespace DocuLint
                         Start = entry.Start,
                         BookmarkOrRange = entry.Start
                     }));
-                MergeSavedRequirements(doc);
+                MergeSavedRequirements(saved);
                 RenderRows();
                 hasUnsavedChanges = true;
-                btnRefresh.Text = "重新加载";
                 ApplyBatchExtractionState(batchExtractionEnabled);
                 string scope = BuildMarkerScopeDescription(markerFilterEnabled, markerIdentifiers.Count);
                 SetStatus($"已加载 {requirements.Count} 个需求标识（{scope}）；右键或按 Delete 可删除不需要的标识");
@@ -632,9 +658,9 @@ namespace DocuLint
             }
         }
 
-        private void MergeSavedRequirements(Word.Document doc)
+        private void MergeSavedRequirements(Dictionary<string, RequirementItem> saved)
         {
-            Dictionary<string, RequirementItem> saved = LoadSavedRequirements(doc);
+            saved = saved ?? new Dictionary<string, RequirementItem>(StringComparer.OrdinalIgnoreCase);
             foreach (RequirementItem item in requirements)
             {
                 if (item == null || string.IsNullOrWhiteSpace(item.Id))
@@ -775,28 +801,129 @@ namespace DocuLint
 
         private static void DeleteSavedRequirementParts(Word.Document doc)
         {
-            Office.CustomXMLPart part;
-            while ((part = FindSavedRequirementPart(doc)) != null)
+            foreach (Office.CustomXMLPart part in FindSavedRequirementParts(doc))
             {
-                part.Delete();
+                try
+                {
+                    part.Delete();
+                }
+                catch
+                {
+                }
             }
         }
 
         private static Office.CustomXMLPart FindSavedRequirementPart(Word.Document doc)
         {
+            List<Office.CustomXMLPart> parts = FindSavedRequirementParts(doc);
+            for (int index = parts.Count - 1; index >= 0; index--)
+            {
+                if (ContainsSavedRequirement(parts[index]))
+                {
+                    return parts[index];
+                }
+            }
+
+            return parts.Count > 0 ? parts[parts.Count - 1] : null;
+        }
+
+        private static bool ContainsSavedRequirement(Office.CustomXMLPart part)
+        {
+            try
+            {
+                XDocument document = XDocument.Parse(part?.XML ?? string.Empty);
+                XName itemName = XName.Get("requirement", SavedRequirementsNamespace);
+                return document.Descendants(itemName).Any();
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static List<Office.CustomXMLPart> FindSavedRequirementParts(Word.Document doc)
+        {
+            List<Office.CustomXMLPart> result = new List<Office.CustomXMLPart>();
+            HashSet<string> partIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (doc == null)
             {
-                return null;
+                return result;
             }
 
             try
             {
                 Office.CustomXMLParts parts = doc.CustomXMLParts.SelectByNamespace(SavedRequirementsNamespace);
-                return parts != null && parts.Count > 0 ? parts[1] : null;
+                AddMatchingSavedParts(parts, result, partIds);
             }
             catch
             {
-                return null;
+            }
+
+            // Some Office builds do not reliably return custom XML parts through
+            // SelectByNamespace. Enumerate all parts as a compatibility fallback.
+            try
+            {
+                AddMatchingSavedParts(doc.CustomXMLParts, result, partIds);
+            }
+            catch
+            {
+            }
+
+            return result;
+        }
+
+        private static void AddMatchingSavedParts(
+            Office.CustomXMLParts parts,
+            ICollection<Office.CustomXMLPart> result,
+            ISet<string> partIds)
+        {
+            if (parts == null)
+            {
+                return;
+            }
+
+            for (int index = 1; index <= parts.Count; index++)
+            {
+                Office.CustomXMLPart part = null;
+                try
+                {
+                    part = parts[index];
+                    if (!IsSavedRequirementPart(part))
+                    {
+                        continue;
+                    }
+
+                    string id = part.Id ?? string.Empty;
+                    if (id.Length == 0 || partIds.Add(id))
+                    {
+                        result.Add(part);
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private static bool IsSavedRequirementPart(Office.CustomXMLPart part)
+        {
+            try
+            {
+                string xml = part?.XML;
+                if (string.IsNullOrWhiteSpace(xml))
+                {
+                    return false;
+                }
+
+                XDocument document = XDocument.Parse(xml);
+                XElement root = document.Root;
+                return root != null &&
+                       string.Equals(root.Name.LocalName, "requirements", StringComparison.OrdinalIgnoreCase) &&
+                       string.Equals(root.Name.NamespaceName, SavedRequirementsNamespace, StringComparison.Ordinal);
+            }
+            catch
+            {
+                return false;
             }
         }
 
