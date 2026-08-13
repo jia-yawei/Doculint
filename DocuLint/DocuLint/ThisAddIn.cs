@@ -326,7 +326,7 @@ namespace DocuLint
             {
                 requirementTrackingTaskPane = CustomTaskPanes.Add(requirementTrackingConsoleControl, "需求追踪控制台");
                 requirementTrackingTaskPane.DockPosition = Office.MsoCTPDockPosition.msoCTPDockPositionRight;
-                requirementTrackingTaskPane.Width = GetInitialTaskPaneWidth(0.42, 760, 1300);
+                requirementTrackingTaskPane.Width = GetInitialTaskPaneWidth(0.42, 760, 1600);
             }
         }
 
@@ -389,7 +389,7 @@ namespace DocuLint
 
             CustomTaskPane taskPane = CustomTaskPanes.Add(control, "需求提取", activeWindow);
             taskPane.DockPosition = Office.MsoCTPDockPosition.msoCTPDockPositionRight;
-            taskPane.Width = GetInitialTaskPaneWidth(0.30, 480, 900);
+            taskPane.Width = GetInitialTaskPaneWidth(0.30, 480, 1100);
 
             RequirementExtractionPaneContext context = new RequirementExtractionPaneContext
             {
