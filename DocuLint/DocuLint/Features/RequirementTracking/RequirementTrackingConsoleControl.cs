@@ -94,15 +94,17 @@ namespace DocuLint
                 RowCount = 3,
                 Padding = new Padding(6)
             };
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 82f));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             FlowLayoutPanel header = new FlowLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
+                WrapContents = true,
                 Margin = new Padding(0, 0, 0, 4)
             };
             btnExportTable = CreatePrimaryButton("导出追踪表");
@@ -113,7 +115,7 @@ namespace DocuLint
             btnClearTraceMappings.Dock = DockStyle.None;
             btnClearTraceMappings.Width = 156;
             btnClearTraceMappings.Click += (_, __) => ClearTraceMappings();
-            btnToggleIdentifierView = CreatePrimaryButton("精简视图");
+            btnToggleIdentifierView = CreatePrimaryButton("精简标识");
             btnToggleIdentifierView.Dock = DockStyle.None;
             btnToggleIdentifierView.Width = 120;
             btnToggleIdentifierView.Click += (_, __) => ToggleIdentifierView();
@@ -123,19 +125,21 @@ namespace DocuLint
 
             TableLayoutPanel documentOptions = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 5,
                 RowCount = 2,
                 Margin = new Padding(0),
                 Padding = new Padding(0, 2, 0, 2)
             };
-            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 96f));
-            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 172f));
-            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 124f));
-            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 156f));
-            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            documentOptions.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
-            documentOptions.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
+            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 104f));
+            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22f));
+            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 16f));
+            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20f));
+            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 28f));
+            documentOptions.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            documentOptions.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             lblTraceTemplate = CreateToolbarLabel("追踪模板");
             ConfigureOptionLabel(lblTraceTemplate);
@@ -161,7 +165,9 @@ namespace DocuLint
             lblCustomTargetTitle.Visible = false;
             FlowLayoutPanel customTitles = new FlowLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
                 Margin = new Padding(0)
@@ -211,7 +217,8 @@ namespace DocuLint
 
             txtTargetSearch = new TextBox
             {
-                Width = 220,
+                Width = 160,
+                MinimumSize = new Size(90, 0),
                 Margin = new Padding(6, 4, 0, 0)
             };
             txtTargetSearch.TextChanged += (_, __) => RenderTargets();
@@ -237,7 +244,7 @@ namespace DocuLint
                 BackColor = Color.White
             };
             recommendedTargetTab.Controls.Add(recommendedTargetPanel);
-            allTargetTab = new TabPage("详细需求列表")
+            allTargetTab = new TabPage("全部需求列表")
             {
                 Padding = new Padding(6),
                 BackColor = Color.White
@@ -984,7 +991,7 @@ namespace DocuLint
         private void ToggleIdentifierView()
         {
             compactIdentifierView = !compactIdentifierView;
-            btnToggleIdentifierView.Text = compactIdentifierView ? "详细视图" : "精简视图";
+            btnToggleIdentifierView.Text = compactIdentifierView ? "详细标识" : "精简标识";
             RefreshViewPreservingSelection();
         }
 
@@ -1633,7 +1640,7 @@ namespace DocuLint
                 ? $"目标需求：{targetTitle}（{targetCount}）"
                 : $"目标需求：{targetSnapshot.DisplayName} - {targetTitle}（{targetCount}）";
             lblRecommendedTitle.Text = $"候选推荐（当前 {gridTargetRecommended.Rows.Count} 条）";
-            lblAllTargetTitle.Text = $"详细需求列表（{gridTargetAll.Rows.Count} 条）";
+            lblAllTargetTitle.Text = $"全部需求列表（{gridTargetAll.Rows.Count} 条）";
             if (recommendedTargetTab != null)
             {
                 recommendedTargetTab.Text = $"候选推荐（{gridTargetRecommended.Rows.Count}）";
@@ -1641,7 +1648,7 @@ namespace DocuLint
 
             if (allTargetTab != null)
             {
-                allTargetTab.Text = $"详细需求列表（{gridTargetAll.Rows.Count}）";
+                allTargetTab.Text = $"全部需求列表（{gridTargetAll.Rows.Count}）";
             }
         }
 
@@ -1932,7 +1939,7 @@ namespace DocuLint
             label.Dock = DockStyle.Fill;
             label.Margin = new Padding(0, 0, 6, 0);
             label.Padding = Padding.Empty;
-            label.TextAlign = ContentAlignment.MiddleRight;
+            label.TextAlign = ContentAlignment.MiddleLeft;
         }
 
         private static void ConfigureOptionComboBox(ComboBox comboBox)
@@ -1994,9 +2001,9 @@ namespace DocuLint
             {
                 Dock = DockStyle.Fill,
                 Text = text,
-                Height = 36,
+                Height = 32,
                 Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold, GraphicsUnit.Point),
-                Margin = new Padding(4, 6, 0, 6),
+                Margin = new Padding(0, 4, 6, 4),
                 UseVisualStyleBackColor = false,
                 BackColor = Color.FromArgb(42, 122, 226),
                 ForeColor = Color.White,
@@ -2064,19 +2071,21 @@ namespace DocuLint
                 Dock = DockStyle.Fill,
                 AllowUserToAddRows = false,
                 AllowUserToDeleteRows = false,
+                AllowUserToResizeColumns = true,
                 AllowUserToResizeRows = false,
                 AutoGenerateColumns = false,
                 BackgroundColor = Color.White,
                 BorderStyle = BorderStyle.None,
-                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
-                ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None,
+                CellBorderStyle = DataGridViewCellBorderStyle.Single,
+                ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single,
                 ColumnHeadersHeight = 32,
                 EnableHeadersVisualStyles = false,
                 GridColor = Color.FromArgb(229, 234, 242),
                 MultiSelect = false,
                 ReadOnly = !includeCheckColumn,
                 RowHeadersVisible = false,
-                RowTemplate = { Height = 30 },
+                RowTemplate = { Height = 32 },
+                ScrollBars = ScrollBars.Both,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect
             };
 
@@ -2092,20 +2101,117 @@ namespace DocuLint
 
             if (includeCheckColumn)
             {
-                grid.Columns.Add(new DataGridViewCheckBoxColumn
+                DataGridViewCheckBoxColumn mappedColumn = new DataGridViewCheckBoxColumn
                 {
                     Name = "Mapped",
                     HeaderText = "追踪",
-                    Width = 54,
+                    Width = 58,
+                    MinimumWidth = 50,
                     AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
-                    ReadOnly = false
-                });
+                    ReadOnly = false,
+                    Resizable = DataGridViewTriState.True,
+                    SortMode = DataGridViewColumnSortMode.NotSortable,
+                    FlatStyle = FlatStyle.Standard,
+                    CellTemplate = new VisibleCheckBoxCell()
+                };
+                mappedColumn.DefaultCellStyle = new DataGridViewCellStyle
+                {
+                    Alignment = DataGridViewContentAlignment.MiddleCenter,
+                    NullValue = false,
+                    Padding = new Padding(2, 0, 2, 0)
+                };
+                grid.Columns.Add(mappedColumn);
+                mappedColumn.Frozen = true;
+                mappedColumn.DisplayIndex = 0;
             }
 
-            grid.Columns.Add(CreateRequirementTextColumn("Id", "需求标识", 30f));
-            grid.Columns.Add(CreateRequirementTextColumn("Name", "需求名称", 50f));
-            grid.Columns.Add(CreateRequirementTextColumn("SectionNumber", "章节号", 20f));
+            grid.Columns.Add(CreateRequirementTextColumn("Id", "需求标识", 30f, 110));
+            grid.Columns.Add(CreateRequirementTextColumn("Name", "需求名称", 50f, 140));
+            grid.Columns.Add(CreateRequirementTextColumn("SectionNumber", "章节号", 20f, 78));
             return grid;
+        }
+
+        private sealed class VisibleCheckBoxCell : DataGridViewCheckBoxCell
+        {
+            protected override void Paint(
+                Graphics graphics,
+                Rectangle clipBounds,
+                Rectangle cellBounds,
+                int rowIndex,
+                DataGridViewElementStates cellState,
+                object value,
+                object formattedValue,
+                string errorText,
+                DataGridViewCellStyle cellStyle,
+                DataGridViewAdvancedBorderStyle advancedBorderStyle,
+                DataGridViewPaintParts paintParts)
+            {
+                base.Paint(
+                    graphics,
+                    clipBounds,
+                    cellBounds,
+                    rowIndex,
+                    cellState,
+                    value,
+                    formattedValue,
+                    errorText,
+                    cellStyle,
+                    advancedBorderStyle,
+                    paintParts & ~DataGridViewPaintParts.ContentForeground);
+
+                bool isChecked;
+                try
+                {
+                    isChecked = Convert.ToBoolean(value ?? false);
+                }
+                catch
+                {
+                    isChecked = false;
+                }
+
+                float dpiScale = Math.Max(1F, graphics.DpiX / 96F);
+                int preferredSize = (int)Math.Round(16F * dpiScale);
+                int inset = (int)Math.Round(8F * dpiScale);
+                int availableSize = Math.Max(1, Math.Min(cellBounds.Width, cellBounds.Height) - inset);
+                int size = Math.Min(preferredSize, availableSize);
+                Rectangle box = new Rectangle(
+                    cellBounds.X + (cellBounds.Width - size) / 2,
+                    cellBounds.Y + (cellBounds.Height - size) / 2,
+                    size - 1,
+                    size - 1);
+                Color blue = Color.FromArgb(38, 117, 201);
+                Color border = isChecked ? blue : Color.FromArgb(112, 123, 137);
+                Color fill = isChecked ? blue : Color.White;
+                using (Brush fillBrush = new SolidBrush(fill))
+                using (Pen borderPen = new Pen(border, Math.Max(1F, dpiScale)))
+                {
+                    graphics.FillRectangle(fillBrush, box);
+                    graphics.DrawRectangle(borderPen, box);
+                }
+
+                if (isChecked)
+                {
+                    System.Drawing.Drawing2D.SmoothingMode previousSmoothingMode = graphics.SmoothingMode;
+                    graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                    using (Pen checkPen = new Pen(Color.White, Math.Max(2F, 2F * dpiScale)))
+                    {
+                        checkPen.StartCap = System.Drawing.Drawing2D.LineCap.Round;
+                        checkPen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+                        checkPen.LineJoin = System.Drawing.Drawing2D.LineJoin.Round;
+                        Point first = new Point(
+                            box.Left + (int)Math.Round(box.Width * 0.22F),
+                            box.Top + (int)Math.Round(box.Height * 0.52F));
+                        Point middle = new Point(
+                            box.Left + (int)Math.Round(box.Width * 0.43F),
+                            box.Top + (int)Math.Round(box.Height * 0.73F));
+                        Point last = new Point(
+                            box.Left + (int)Math.Round(box.Width * 0.80F),
+                            box.Top + (int)Math.Round(box.Height * 0.28F));
+                        graphics.DrawLines(checkPen, new[] { first, middle, last });
+                    }
+                    graphics.SmoothingMode = previousSmoothingMode;
+                }
+            }
         }
 
         private void RestoreTargetSelection(DataGridView grid)
@@ -2135,7 +2241,11 @@ namespace DocuLint
             }
         }
 
-        private static DataGridViewTextBoxColumn CreateRequirementTextColumn(string name, string headerText, float fillWeight)
+        private static DataGridViewTextBoxColumn CreateRequirementTextColumn(
+            string name,
+            string headerText,
+            float fillWeight,
+            int minimumWidth)
         {
             return new DataGridViewTextBoxColumn
             {
@@ -2143,7 +2253,9 @@ namespace DocuLint
                 HeaderText = headerText,
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
                 FillWeight = fillWeight,
+                MinimumWidth = minimumWidth,
                 ReadOnly = true,
+                Resizable = DataGridViewTriState.True,
                 DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleCenter },
                 SortMode = DataGridViewColumnSortMode.NotSortable
             };
