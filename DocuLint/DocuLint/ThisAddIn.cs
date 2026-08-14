@@ -20,6 +20,8 @@ namespace DocuLint
         private RequirementTrackingConsoleControl requirementTrackingConsoleControl;
         // 需求追踪独立任务窗格
         private CustomTaskPane requirementTrackingTaskPane;
+        private readonly Dictionary<int, RequirementTrackingPaneContext> requirementTrackingPanes =
+            new Dictionary<int, RequirementTrackingPaneContext>();
         private readonly Dictionary<int, RequirementExtractionPaneContext> requirementExtractionPanes =
             new Dictionary<int, RequirementExtractionPaneContext>();
         private RequirementExtractionPaneControl requirementExtractionPaneControl;
@@ -159,7 +161,7 @@ namespace DocuLint
             }
 
             RemoveTaskPane(ref navigationTaskPane, ref navigationPaneControl);
-            RemoveTaskPane(ref requirementTrackingTaskPane, ref requirementTrackingConsoleControl);
+            RemoveAllRequirementTrackingPanes();
             RemoveAllRequirementExtractionPanes();
             RemoveTaskPane(ref documentCheckResultTaskPane, ref documentCheckResultPaneControl);
             DisposeRequirementQuickAddPopup();
@@ -317,17 +319,93 @@ namespace DocuLint
 
         private void EnsureRequirementTrackingPane()
         {
-            if (requirementTrackingConsoleControl == null)
+            Word.Window activeWindow = null;
+            Word.Document activeDocument = null;
+            try
             {
-                requirementTrackingConsoleControl = new RequirementTrackingConsoleControl(() => Application);
+                activeWindow = Application?.ActiveWindow;
+                activeDocument = Application?.ActiveDocument;
+            }
+            catch
+            {
             }
 
-            if (requirementTrackingTaskPane == null)
+            int windowKey = GetWordWindowKey(activeWindow);
+            if (windowKey == 0)
             {
-                requirementTrackingTaskPane = CustomTaskPanes.Add(requirementTrackingConsoleControl, "需求追踪控制台");
-                requirementTrackingTaskPane.DockPosition = Office.MsoCTPDockPosition.msoCTPDockPositionRight;
-                requirementTrackingTaskPane.Width = GetInitialTaskPaneWidth(0.42, 760, 1600);
+                SetActiveRequirementTrackingPane(null);
+                return;
             }
+
+            string documentKey = GetDocumentKey(activeDocument);
+            if (requirementTrackingPanes.TryGetValue(
+                windowKey,
+                out RequirementTrackingPaneContext existingContext))
+            {
+                if (string.Equals(
+                    existingContext.DocumentKey,
+                    documentKey,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    SetActiveRequirementTrackingPane(existingContext);
+                    return;
+                }
+
+                RemoveRequirementTrackingPane(windowKey, existingContext);
+            }
+
+            RequirementTrackingConsoleControl control =
+                new RequirementTrackingConsoleControl(() => Application);
+            CustomTaskPane taskPane = CustomTaskPanes.Add(
+                control,
+                "需求追踪控制台",
+                activeWindow);
+            taskPane.DockPosition = Office.MsoCTPDockPosition.msoCTPDockPositionRight;
+            // Request the widest pane; Word clamps this value to the maximum
+            // docked width supported by the current document window.
+            taskPane.Width = 2400;
+
+            RequirementTrackingPaneContext context = new RequirementTrackingPaneContext
+            {
+                WindowKey = windowKey,
+                DocumentKey = documentKey,
+                Control = control,
+                TaskPane = taskPane
+            };
+            requirementTrackingPanes[windowKey] = context;
+            SetActiveRequirementTrackingPane(context);
+        }
+
+        private void SetActiveRequirementTrackingPane(RequirementTrackingPaneContext context)
+        {
+            requirementTrackingConsoleControl = context?.Control;
+            requirementTrackingTaskPane = context?.TaskPane;
+        }
+
+        private void SelectRequirementTrackingPaneForWindow(
+            Word.Window window,
+            Word.Document document)
+        {
+            int windowKey = GetWordWindowKey(window);
+            string documentKey = GetDocumentKey(document);
+            if (windowKey != 0 &&
+                requirementTrackingPanes.TryGetValue(
+                    windowKey,
+                    out RequirementTrackingPaneContext context))
+            {
+                if (string.Equals(
+                    context.DocumentKey,
+                    documentKey,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    SetActiveRequirementTrackingPane(context);
+                    return;
+                }
+
+                RemoveRequirementTrackingPane(windowKey, context);
+            }
+
+            SetActiveRequirementTrackingPane(null);
         }
 
         private void EnsureRequirementExtractionPane()
@@ -705,6 +783,7 @@ namespace DocuLint
         {
             Ribbon1.HandleStyleBrushWindowActivated(doc);
             isSwitchingWordWindow = false;
+            SelectRequirementTrackingPaneForWindow(wn, doc);
             SelectRequirementExtractionPaneForWindow(wn, doc);
             StopStyleRibbonRefresh();
             StopRequirementExtractionAutoAdd();
@@ -1281,6 +1360,56 @@ namespace DocuLint
             requirementExtractionPanes.Remove(windowKey);
         }
 
+        private void RemoveRequirementTrackingPane(
+            int windowKey,
+            RequirementTrackingPaneContext context)
+        {
+            if (context == null)
+            {
+                requirementTrackingPanes.Remove(windowKey);
+                return;
+            }
+
+            if (ReferenceEquals(requirementTrackingTaskPane, context.TaskPane))
+            {
+                SetActiveRequirementTrackingPane(null);
+            }
+
+            try
+            {
+                if (context.TaskPane != null)
+                {
+                    CustomTaskPanes.Remove(context.TaskPane);
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                context.Control?.Dispose();
+            }
+            catch
+            {
+            }
+
+            requirementTrackingPanes.Remove(windowKey);
+        }
+
+        private void RemoveAllRequirementTrackingPanes()
+        {
+            foreach (KeyValuePair<int, RequirementTrackingPaneContext> item in
+                new List<KeyValuePair<int, RequirementTrackingPaneContext>>(
+                    requirementTrackingPanes))
+            {
+                RemoveRequirementTrackingPane(item.Key, item.Value);
+            }
+
+            requirementTrackingPanes.Clear();
+            SetActiveRequirementTrackingPane(null);
+        }
+
         private void RemoveAllRequirementExtractionPanes()
         {
             foreach (KeyValuePair<int, RequirementExtractionPaneContext> item in
@@ -1319,6 +1448,14 @@ namespace DocuLint
             internal RequirementExtractionPaneControl Control { get; set; }
             internal CustomTaskPane TaskPane { get; set; }
             internal bool Removing { get; set; }
+        }
+
+        private sealed class RequirementTrackingPaneContext
+        {
+            internal int WindowKey { get; set; }
+            internal string DocumentKey { get; set; }
+            internal RequirementTrackingConsoleControl Control { get; set; }
+            internal CustomTaskPane TaskPane { get; set; }
         }
 
         private sealed class RequirementQuickAddForm : Form

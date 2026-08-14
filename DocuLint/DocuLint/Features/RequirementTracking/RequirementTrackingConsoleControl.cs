@@ -115,7 +115,7 @@ namespace DocuLint
             btnClearTraceMappings.Dock = DockStyle.None;
             btnClearTraceMappings.Width = 156;
             btnClearTraceMappings.Click += (_, __) => ClearTraceMappings();
-            btnToggleIdentifierView = CreatePrimaryButton("精简视图");
+            btnToggleIdentifierView = CreatePrimaryButton("精简标识");
             btnToggleIdentifierView.Dock = DockStyle.None;
             btnToggleIdentifierView.Width = 120;
             btnToggleIdentifierView.Click += (_, __) => ToggleIdentifierView();
@@ -133,7 +133,7 @@ namespace DocuLint
                 Margin = new Padding(0),
                 Padding = new Padding(0, 2, 0, 2)
             };
-            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 14f));
+            documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 104f));
             documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22f));
             documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 16f));
             documentOptions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20f));
@@ -244,7 +244,7 @@ namespace DocuLint
                 BackColor = Color.White
             };
             recommendedTargetTab.Controls.Add(recommendedTargetPanel);
-            allTargetTab = new TabPage("详细需求列表")
+            allTargetTab = new TabPage("全部需求列表")
             {
                 Padding = new Padding(6),
                 BackColor = Color.White
@@ -991,7 +991,7 @@ namespace DocuLint
         private void ToggleIdentifierView()
         {
             compactIdentifierView = !compactIdentifierView;
-            btnToggleIdentifierView.Text = compactIdentifierView ? "详细视图" : "精简视图";
+            btnToggleIdentifierView.Text = compactIdentifierView ? "详细标识" : "精简标识";
             RefreshViewPreservingSelection();
         }
 
@@ -1640,7 +1640,7 @@ namespace DocuLint
                 ? $"目标需求：{targetTitle}（{targetCount}）"
                 : $"目标需求：{targetSnapshot.DisplayName} - {targetTitle}（{targetCount}）";
             lblRecommendedTitle.Text = $"候选推荐（当前 {gridTargetRecommended.Rows.Count} 条）";
-            lblAllTargetTitle.Text = $"详细需求列表（{gridTargetAll.Rows.Count} 条）";
+            lblAllTargetTitle.Text = $"全部需求列表（{gridTargetAll.Rows.Count} 条）";
             if (recommendedTargetTab != null)
             {
                 recommendedTargetTab.Text = $"候选推荐（{gridTargetRecommended.Rows.Count}）";
@@ -1648,7 +1648,7 @@ namespace DocuLint
 
             if (allTargetTab != null)
             {
-                allTargetTab.Text = $"详细需求列表（{gridTargetAll.Rows.Count}）";
+                allTargetTab.Text = $"全部需求列表（{gridTargetAll.Rows.Count}）";
             }
         }
 
@@ -1939,7 +1939,7 @@ namespace DocuLint
             label.Dock = DockStyle.Fill;
             label.Margin = new Padding(0, 0, 6, 0);
             label.Padding = Padding.Empty;
-            label.TextAlign = ContentAlignment.MiddleRight;
+            label.TextAlign = ContentAlignment.MiddleLeft;
         }
 
         private static void ConfigureOptionComboBox(ComboBox comboBox)
@@ -2071,12 +2071,13 @@ namespace DocuLint
                 Dock = DockStyle.Fill,
                 AllowUserToAddRows = false,
                 AllowUserToDeleteRows = false,
+                AllowUserToResizeColumns = true,
                 AllowUserToResizeRows = false,
                 AutoGenerateColumns = false,
                 BackgroundColor = Color.White,
                 BorderStyle = BorderStyle.None,
-                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
-                ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None,
+                CellBorderStyle = DataGridViewCellBorderStyle.Single,
+                ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single,
                 ColumnHeadersHeight = 32,
                 EnableHeadersVisualStyles = false,
                 GridColor = Color.FromArgb(229, 234, 242),
@@ -2108,7 +2109,7 @@ namespace DocuLint
                     MinimumWidth = 50,
                     AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
                     ReadOnly = false,
-                    Resizable = DataGridViewTriState.False,
+                    Resizable = DataGridViewTriState.True,
                     SortMode = DataGridViewColumnSortMode.NotSortable,
                     FlatStyle = FlatStyle.Standard,
                     CellTemplate = new VisibleCheckBoxCell()
@@ -2156,27 +2157,7 @@ namespace DocuLint
                     errorText,
                     cellStyle,
                     advancedBorderStyle,
-                    paintParts);
-
-                float dpiScale = Math.Max(1f, graphics.DpiX / 96f);
-                int preferredSize = (int)Math.Round(16f * dpiScale);
-                int minimumSize = (int)Math.Round(14f * dpiScale);
-                int inset = (int)Math.Round(8f * dpiScale);
-                int size = Math.Min(preferredSize, Math.Max(minimumSize, Math.Min(cellBounds.Width, cellBounds.Height) - inset));
-                Rectangle box = new Rectangle(
-                    cellBounds.X + (cellBounds.Width - size) / 2,
-                    cellBounds.Y + (cellBounds.Height - size) / 2,
-                    size - 1,
-                    size - 1);
-                bool selected = (cellState & DataGridViewElementStates.Selected) != 0;
-                Color borderColor = selected ? Color.FromArgb(38, 90, 166) : Color.FromArgb(95, 105, 118);
-                Color fillColor = selected ? Color.FromArgb(245, 249, 255) : Color.White;
-                using (Brush fill = new SolidBrush(fillColor))
-                using (Pen border = new Pen(borderColor, Math.Max(1f, dpiScale)))
-                {
-                    graphics.FillRectangle(fill, box);
-                    graphics.DrawRectangle(border, box);
-                }
+                    paintParts & ~DataGridViewPaintParts.ContentForeground);
 
                 bool isChecked;
                 try
@@ -2188,17 +2169,47 @@ namespace DocuLint
                     isChecked = false;
                 }
 
+                float dpiScale = Math.Max(1F, graphics.DpiX / 96F);
+                int preferredSize = (int)Math.Round(16F * dpiScale);
+                int inset = (int)Math.Round(8F * dpiScale);
+                int availableSize = Math.Max(1, Math.Min(cellBounds.Width, cellBounds.Height) - inset);
+                int size = Math.Min(preferredSize, availableSize);
+                Rectangle box = new Rectangle(
+                    cellBounds.X + (cellBounds.Width - size) / 2,
+                    cellBounds.Y + (cellBounds.Height - size) / 2,
+                    size - 1,
+                    size - 1);
+                Color blue = Color.FromArgb(38, 117, 201);
+                Color border = isChecked ? blue : Color.FromArgb(112, 123, 137);
+                Color fill = isChecked ? blue : Color.White;
+                using (Brush fillBrush = new SolidBrush(fill))
+                using (Pen borderPen = new Pen(border, Math.Max(1F, dpiScale)))
+                {
+                    graphics.FillRectangle(fillBrush, box);
+                    graphics.DrawRectangle(borderPen, box);
+                }
+
                 if (isChecked)
                 {
-                    using (Pen check = new Pen(Color.FromArgb(38, 90, 166), Math.Max(2f, 2f * dpiScale)))
+                    System.Drawing.Drawing2D.SmoothingMode previousSmoothingMode = graphics.SmoothingMode;
+                    graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                    using (Pen checkPen = new Pen(Color.White, Math.Max(2F, 2F * dpiScale)))
                     {
-                        check.StartCap = System.Drawing.Drawing2D.LineCap.Round;
-                        check.EndCap = System.Drawing.Drawing2D.LineCap.Round;
-                        Point p1 = new Point(box.Left + 3, box.Top + box.Height / 2);
-                        Point p2 = new Point(box.Left + box.Width / 2 - 1, box.Bottom - 3);
-                        Point p3 = new Point(box.Right - 3, box.Top + 3);
-                        graphics.DrawLines(check, new[] { p1, p2, p3 });
+                        checkPen.StartCap = System.Drawing.Drawing2D.LineCap.Round;
+                        checkPen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+                        checkPen.LineJoin = System.Drawing.Drawing2D.LineJoin.Round;
+                        Point first = new Point(
+                            box.Left + (int)Math.Round(box.Width * 0.22F),
+                            box.Top + (int)Math.Round(box.Height * 0.52F));
+                        Point middle = new Point(
+                            box.Left + (int)Math.Round(box.Width * 0.43F),
+                            box.Top + (int)Math.Round(box.Height * 0.73F));
+                        Point last = new Point(
+                            box.Left + (int)Math.Round(box.Width * 0.80F),
+                            box.Top + (int)Math.Round(box.Height * 0.28F));
+                        graphics.DrawLines(checkPen, new[] { first, middle, last });
                     }
+                    graphics.SmoothingMode = previousSmoothingMode;
                 }
             }
         }
@@ -2244,6 +2255,7 @@ namespace DocuLint
                 FillWeight = fillWeight,
                 MinimumWidth = minimumWidth,
                 ReadOnly = true,
+                Resizable = DataGridViewTriState.True,
                 DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleCenter },
                 SortMode = DataGridViewColumnSortMode.NotSortable
             };
