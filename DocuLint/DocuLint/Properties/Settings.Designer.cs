@@ -23,5 +23,29 @@ namespace DocuLint.Properties {
             }
         }
 
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string CommonStyleNames {
+            get {
+                return ((string)(this["CommonStyleNames"]));
+            }
+            set {
+                this["CommonStyleNames"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string CommonPhraseLibraryPath {
+            get {
+                return ((string)(this["CommonPhraseLibraryPath"]));
+            }
+            set {
+                this["CommonPhraseLibraryPath"] = value;
+            }
+        }
+
     }
 }

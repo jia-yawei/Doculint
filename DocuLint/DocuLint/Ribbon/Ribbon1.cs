@@ -18,6 +18,10 @@ namespace DocuLint
     {
         private static readonly List<Ribbon1> LoadedInstances = new List<Ribbon1>();
         private bool updatingOutlineLevel;
+        private bool updatingCommonStyles;
+        private string commonStylesDocumentKey = string.Empty;
+        private static readonly Dictionary<string, List<string>> headingStyleLibraryCache =
+            new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         private static Dictionary<int, StyleDefinitionRequest> styleDefinitions;
         private static OutlineNumberPattern outlineNumberPattern = OutlineNumberPattern.Decimal;
         private static int outlineNumberTextSpacing = 1;
@@ -31,7 +35,6 @@ namespace DocuLint
         private static int styleBrushSourceEnd = -1;
         private static IntPtr keyboardHookHandle = IntPtr.Zero;
         private static LowLevelKeyboardProc keyboardHookProc;
-        private const string StyleGalleryPlaceholderLabel = "当前样式";
         internal static bool RequirementTrackingEnabled => true;
 
         private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
@@ -248,15 +251,25 @@ namespace DocuLint
                 return;
             }
 
-            RegisterInstance();
-            UpdateHelpVersionLabel();
-            InitializeOutlineLevelDropDown();
-            button9.Click += button9_Click;
-            button10.Click += button10_Click;
-            button11.Click += button11_Click;
-            button12.Click += button12_Click;
+            // Ribbon 选项卡必须优先显示，后续初始化失败也不能影响其可见性。
+            tab1.Label = "搞快点";
+            tab1.Visible = true;
 
-            InitializeStyleGalleriesLightweight();
+            try
+            {
+                RegisterInstance();
+                UpdateHelpVersionLabel();
+                InitializeOutlineLevelDropDown();
+                button9.Click += button9_Click;
+                button10.Click += button10_Click;
+                button11.Click += button11_Click;
+                button12.Click += button12_Click;
+                InitializeStyleGalleriesLightweight();
+            }
+            catch
+            {
+                // 保留已经创建的选项卡，避免单个控件初始化异常导致整个 Ribbon 不显示。
+            }
         }
 
         private void ApplyFeatureAvailability()
@@ -489,22 +502,52 @@ namespace DocuLint
         // 刷新当前样式显示，保持和 Word 当前光标所在段落样式一致。
         internal void RefreshCurrentStyleIndicator()
         {
-            if (styleGalleryDropDown == null)
+            string currentStyleName = GetCurrentParagraphStyleName();
+            UpdateCurrentStyleStatusBar(Globals.ThisAddIn?.Application, currentStyleName);
+            RefreshCommonStyleDropDown();
+            SelectOutlineLevelItem(GetCurrentSelectionOutlineLevel());
+        }
+
+        private void btnStandardReading_Click(object sender, RibbonControlEventArgs e)
+        {
+            OpenStandardsFolder();
+        }
+
+        private static void OpenStandardsFolder()
+        {
+            const string packagedRelativePath = "Help\\Standards";
+            const string developmentSourcePath = "E:\\jiayawei\\标准\\GJB\\A3，31-GJB438C软件开发文档全套模板word 软件开发相关标准 GJB438B模板\\（2）GJB 软件相关标准（共18份）\\GJB 438C-2021《军用软件开发文档通用要求》.pdf";
+
+            string packagedFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, packagedRelativePath);
+            string sourceFolder = Path.GetDirectoryName(developmentSourcePath);
+            string folder = Directory.Exists(packagedFolder) ? packagedFolder : sourceFolder;
+            if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
             {
+                MessageBox.Show("未找到标准文件夹，请确认插件资源完整。", "查看标准", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            string currentStyleName = GetCurrentParagraphStyleName();
-            styleGalleryDropDown.Label = "当前样式：" + BuildCurrentStyleGalleryLabel(currentStyleName);
-            styleGalleryDropDown.ScreenTip = "当前样式";
-            styleGalleryDropDown.SuperTip = string.IsNullOrWhiteSpace(currentStyleName)
-                ? "当前段落未读取到样式。"
-                : currentStyleName.Trim();
-            SelectOutlineLevelItem(GetCurrentSelectionOutlineLevel());
+            try
+            {
+                Process.Start("explorer.exe", "\"" + folder + "\"");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("打开标准文件夹失败：\r\n" + ex.Message, "查看标准", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        internal static void RefreshNavigationPaneIndicators()
+        {
+            foreach (Ribbon1 ribbon in LoadedInstances.ToArray())
+            {
+                ribbon?.RefreshNavigationPaneState();
+            }
         }
 
         private void btnToggleNavigationPane_Click(object sender, RibbonControlEventArgs e)
         {
+            bool documentMapToggledDirectly = false;
             try
             {
                 Word.Window activeWindow = Globals.ThisAddIn?.Application?.ActiveWindow;
@@ -513,7 +556,9 @@ namespace DocuLint
                     return;
                 }
 
-                activeWindow.DocumentMap = btnToggleNavigationPane.Checked;
+                bool currentlyVisible = activeWindow.DocumentMap;
+                activeWindow.DocumentMap = !currentlyVisible;
+                documentMapToggledDirectly = true;
             }
             catch
             {
@@ -528,6 +573,22 @@ namespace DocuLint
             finally
             {
                 RefreshNavigationPaneState();
+                if (!documentMapToggledDirectly)
+                {
+                    Globals.ThisAddIn?.ScheduleNavigationPaneStateRefresh();
+                }
+            }
+        }
+
+        private void btnOfficeClipboard_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                Globals.ThisAddIn?.Application?.CommandBars?.ExecuteMso("ShowClipboard");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("打开原生剪贴板失败：\r\n" + ex.Message, "剪贴板");
             }
         }
 
@@ -634,58 +695,6 @@ namespace DocuLint
             }
         }
 
-        private static string FormatStyleGalleryLabel(string styleName)
-        {
-            const int maxDisplayWidth = 20;
-            const string ellipsis = "...";
-            if (string.IsNullOrWhiteSpace(styleName))
-            {
-                return styleName;
-            }
-
-            string normalizedName = styleName.Trim();
-            int displayWidth = 0;
-            int endIndex = 0;
-            while (endIndex < normalizedName.Length)
-            {
-                int characterWidth = normalizedName[endIndex] <= 0x7f ? 1 : 2;
-                if (displayWidth + characterWidth > maxDisplayWidth)
-                {
-                    break;
-                }
-
-                displayWidth += characterWidth;
-                endIndex++;
-            }
-
-            if (endIndex == normalizedName.Length)
-            {
-                return normalizedName;
-            }
-
-            int contentWidth = maxDisplayWidth - ellipsis.Length;
-            displayWidth = 0;
-            endIndex = 0;
-            while (endIndex < normalizedName.Length)
-            {
-                int characterWidth = normalizedName[endIndex] <= 0x7f ? 1 : 2;
-                if (displayWidth + characterWidth > contentWidth)
-                {
-                    break;
-                }
-
-                displayWidth += characterWidth;
-                endIndex++;
-            }
-
-            return normalizedName.Substring(0, endIndex) + ellipsis;
-        }
-
-        private static string BuildCurrentStyleGalleryLabel(string styleName)
-        {
-            return string.IsNullOrWhiteSpace(styleName) ? "<空>" : FormatStyleGalleryLabel(styleName);
-        }
-
         private static IEnumerable<string> GetDocumentStyleNames(Word.Document doc)
         {
             SortedSet<string> names = new SortedSet<string>(StringComparer.CurrentCultureIgnoreCase);
@@ -790,6 +799,28 @@ namespace DocuLint
             ShowTablesAndFiguresFormattingSettingsDialog();
         }
 
+        private void groupSoftwareTools_DialogLauncherClick(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                if (Globals.ThisAddIn?.Application?.ActiveDocument == null)
+                {
+                    MessageBox.Show("当前没有活动文档。", "提取设置");
+                    return;
+                }
+
+                Globals.ThisAddIn.OpenRequirementExtractionSettings();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "打开提取设置失败：\r\n" + ex.Message,
+                    "提取设置",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        }
+
         private void button25_Click(object sender, RibbonControlEventArgs e)
         {
             ExecuteNormalizeSelectedTableAction();
@@ -809,7 +840,7 @@ namespace DocuLint
         {
             try
             {
-                ResetOperationCancellation();
+                ResetOperationCancellation("更新全部题注");
                 Word.Application app = Globals.ThisAddIn.Application;
                 Word.Document doc = app?.ActiveDocument;
                 if (doc == null)
@@ -898,145 +929,215 @@ namespace DocuLint
             }
         }
 
-        private void btnCreateCustomStyles_Click(object sender, RibbonControlEventArgs e)
+        private void group1_DialogLauncherClick(object sender, RibbonControlEventArgs e)
         {
+            Word.Document doc = Globals.ThisAddIn?.Application?.ActiveDocument;
+            if (doc == null)
+            {
+                MessageBox.Show("当前没有活动文档。", "常用样式");
+                return;
+            }
+
             try
             {
-                EnsureStyleDefinitionsInitialized();
-                Word.Application app = Globals.ThisAddIn?.Application;
-                using (CustomStyleLibraryForm form = new CustomStyleLibraryForm(styleDefinitions.Values))
+                string styleLibraryDocumentKey = GetCommonStylesDocumentKey(doc);
+                List<string> cachedStyleNames = GetCachedHeadingStyleNames(styleLibraryDocumentKey);
+                using (CommonStyleSettingsForm form = new CommonStyleSettingsForm(
+                    progress => LoadHeadingStyleNames(doc, styleLibraryDocumentKey, progress),
+                    GetConfiguredCommonStyleNames(),
+                    cachedStyleNames))
                 {
                     if (form.ShowDialog() != DialogResult.OK)
                     {
                         return;
                     }
 
-                    Word.Document doc = app?.ActiveDocument;
-                    if (doc == null)
-                    {
-                        MessageBox.Show("当前没有活动文档。", "文档不加班");
-                        return;
-                    }
-
-                    SaveStyleDefinitions(form.StyleDefinitions);
-                    List<StyleDefinitionRequest> definitionsToCreate = form.StyleDefinitions
-                        .Where(definition => definition.ShouldCreate)
-                        .ToList();
-
-                    List<string> duplicateStyleNames = definitionsToCreate
-                        .Where(definition => DocumentContainsStyle(doc, definition.StyleName))
-                        .Select(definition => definition.StyleName)
-                        .ToList();
-                    if (duplicateStyleNames.Count > 0)
-                    {
-                        string names = string.Join("、", duplicateStyleNames);
-                        DialogResult overwriteResult = MessageBox.Show(
-                            "当前文档已存在同名样式：" + names + "。\r\n是否覆盖这些样式并继续创建？",
-                            "创建自定义样式",
-                            MessageBoxButtons.YesNo,
-                            MessageBoxIcon.Warning);
-                        if (overwriteResult != DialogResult.Yes)
-                        {
-                            return;
-                        }
-                    }
-
-                    using (new WordPerformanceScope(app))
-                    {
-                        foreach (StyleDefinitionRequest definition in definitionsToCreate)
-                        {
-                            CreateOrUpdateDocumentStyle(doc, definition);
-                        }
-                    }
-
-                    InitializeStyleGalleriesLightweight();
-                    TryUpdateStatusBar(app, "自定义样式已创建");
-                    MessageBox.Show("所选自定义样式已应用到当前文档。", "创建自定义样式");
+                    SaveConfiguredCommonStyleNames(form.SelectedStyleNames);
+                    RefreshCommonStyleDropDown(true);
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"创建自定义样式失败: {ex.Message}", "文档不加班");
+                MessageBox.Show($"保存常用样式失败: {ex.Message}", "常用样式");
             }
         }
 
-        private static void SaveStyleDefinitions(IEnumerable<StyleDefinitionRequest> definitions)
+        private void commonStylesDropDown_SelectionChanged(object sender, RibbonControlEventArgs e)
         {
-            EnsureStyleDefinitionsInitialized();
-            styleDefinitions.Clear();
-            foreach (StyleDefinitionRequest definition in definitions ?? StyleDefinitionRequest.CreateDefaultSet())
-            {
-                if (definition != null)
-                {
-                    styleDefinitions[definition.Level] = CloneStyleDefinition(definition);
-                }
-            }
-        }
-
-        private static StyleDefinitionRequest CloneStyleDefinition(StyleDefinitionRequest definition)
-        {
-            return new StyleDefinitionRequest
-            {
-                Level = definition.Level,
-                OutlineLevel = definition.OutlineLevel,
-                ShouldCreate = definition.ShouldCreate,
-                StyleName = definition.StyleName,
-                FontName = definition.FontName,
-                FontSize = definition.FontSize,
-                ListFontName = string.IsNullOrWhiteSpace(definition.ListFontName) ? definition.FontName : definition.ListFontName,
-                ListFontSize = definition.ListFontSize > 0f ? definition.ListFontSize : definition.FontSize,
-                Alignment = definition.Alignment,
-                Bold = definition.Bold,
-                LineSpacing = definition.LineSpacing
-            };
-        }
-
-        private static void CreateOrUpdateDocumentStyle(Word.Document doc, StyleDefinitionRequest definition)
-        {
-            if (doc == null || definition == null || string.IsNullOrWhiteSpace(definition.StyleName))
+            if (updatingCommonStyles)
             {
                 return;
             }
 
-            Word.Style style = null;
+            string styleName = commonStylesDropDown?.SelectedItem?.Label;
+            if (string.IsNullOrWhiteSpace(styleName))
+            {
+                return;
+            }
+
+            Word.Application app = Globals.ThisAddIn?.Application;
+            Word.Document doc = app?.ActiveDocument;
+            Word.Selection selection = app?.Selection;
+            if (doc == null || selection?.Range == null)
+            {
+                MessageBox.Show("当前没有可设置样式的段落。", "常用样式");
+                return;
+            }
+
+            if (!DocumentContainsStyle(doc, styleName))
+            {
+                MessageBox.Show($"当前文档中不存在样式“{styleName}”。", "常用样式");
+                RefreshCommonStyleDropDown(true);
+                return;
+            }
+
             try
             {
-                object key = definition.StyleName;
-                style = doc.Styles[key];
+                Word.Paragraph paragraph = selection.Range.Paragraphs[1];
+                if (!TrySetDocumentParagraphStyle(doc, paragraph?.Range, styleName))
+                {
+                    throw new InvalidOperationException("Word 未能应用该样式。");
+                }
+
+                TryUpdateStatusBar(app, "已应用常用样式：" + styleName);
+                RefreshCurrentStyleIndicator();
+                // 清空当前下拉选择，使同一种样式可连续应用到不同段落。
+                RefreshCommonStyleDropDown(true);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("应用常用样式失败：\r\n" + ex.Message, "常用样式");
+            }
+        }
+
+        private void RefreshCommonStyleDropDown(bool force = false)
+        {
+            if (commonStylesDropDown == null)
+            {
+                return;
+            }
+
+            Word.Document doc = Globals.ThisAddIn?.Application?.ActiveDocument;
+            string documentKey = GetCommonStylesDocumentKey(doc);
+            if (!force && string.Equals(commonStylesDocumentKey, documentKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            updatingCommonStyles = true;
+            try
+            {
+                commonStylesDropDown.Items.Clear();
+                if (doc != null)
+                {
+                    foreach (string styleName in GetConfiguredCommonStyleNames()
+                        .Where(styleName => DocumentContainsStyle(doc, styleName)))
+                    {
+                        RibbonDropDownItem item = Factory.CreateRibbonDropDownItem();
+                        item.Label = styleName;
+                        commonStylesDropDown.Items.Add(item);
+                    }
+                }
+
+                commonStylesDropDown.Enabled = commonStylesDropDown.Items.Count > 0;
+                commonStylesDocumentKey = documentKey;
+            }
+            finally
+            {
+                updatingCommonStyles = false;
+            }
+        }
+
+        private static List<string> GetConfiguredCommonStyleNames()
+        {
+            try
+            {
+                return (Properties.Settings.Default.CommonStyleNames ?? string.Empty)
+                    .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(name => name.Trim())
+                    .Where(name => name.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(9)
+                    .ToList();
+            }
+            catch
+            {
+                return new List<string>();
+            }
+        }
+
+        private static void SaveConfiguredCommonStyleNames(IEnumerable<string> styleNames)
+        {
+            List<string> names = (styleNames ?? Enumerable.Empty<string>())
+                .Select(name => (name ?? string.Empty).Trim())
+                .Where(name => name.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(9)
+                .ToList();
+            Properties.Settings.Default.CommonStyleNames = string.Join("\n", names);
+            Properties.Settings.Default.Save();
+        }
+
+        private static List<string> GetDocumentParagraphStyleNames(
+            Word.Document doc,
+            Action<int, int> progress = null)
+        {
+            List<string> names = new List<string>();
+            if (doc == null)
+            {
+                return names;
+            }
+
+            try
+            {
+                Word.Styles styles = doc.Styles;
+                int count = styles?.Count ?? 0;
+                progress?.Invoke(0, count);
+                for (int index = 1; index <= count; index++)
+                {
+                    if (index == 1 || index == count || index % 10 == 0)
+                    {
+                        progress?.Invoke(index, count);
+                    }
+
+                    Word.Style style = styles[index];
+                    if (style == null || style.Type != Word.WdStyleType.wdStyleTypeParagraph)
+                    {
+                        continue;
+                    }
+
+                    string styleName = style.NameLocal;
+                    if (!string.IsNullOrWhiteSpace(styleName))
+                    {
+                        names.Add(styleName.Trim());
+                    }
+                }
             }
             catch
             {
             }
 
-            if (style == null)
+            return names
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+        }
+
+        private static string GetCommonStylesDocumentKey(Word.Document doc)
+        {
+            if (doc == null)
             {
-                style = doc.Styles.Add(definition.StyleName, Word.WdStyleType.wdStyleTypeParagraph);
+                return string.Empty;
             }
 
-            style.Font.NameFarEast = definition.FontName;
-            style.Font.Name = definition.FontName;
-            style.Font.Size = definition.FontSize;
-            style.Font.Bold = definition.Bold ? -1 : 0;
-            style.ParagraphFormat.Alignment = ToWordParagraphAlignment(definition.Alignment);
-            style.ParagraphFormat.SpaceBefore = 0f;
-            style.ParagraphFormat.SpaceAfter = 0f;
-            if (Math.Abs(definition.LineSpacing - 1f) < 0.01f)
+            try
             {
-                style.ParagraphFormat.LineSpacingRule = Word.WdLineSpacing.wdLineSpaceSingle;
+                return string.IsNullOrWhiteSpace(doc.FullName) ? doc.Name ?? string.Empty : doc.FullName;
             }
-            else
+            catch
             {
-                style.ParagraphFormat.LineSpacingRule = Word.WdLineSpacing.wdLineSpaceExactly;
-                style.ParagraphFormat.LineSpacing = definition.LineSpacing;
+                return string.Empty;
             }
-
-            int outlineLevel = definition.OutlineLevel > 0 ? definition.OutlineLevel : definition.Level;
-            style.ParagraphFormat.OutlineLevel = outlineLevel == 10
-                ? Word.WdOutlineLevel.wdOutlineLevelBodyText
-                : (Word.WdOutlineLevel)Math.Max(1, Math.Min(9, outlineLevel));
-            TrySetComProperty(style, "QuickStyle", true);
-            TrySetComProperty(style, "Visibility", false);
-            TrySetComProperty(style, "UnhideWhenUsed", true);
         }
 
         private static bool DocumentContainsStyle(Word.Document doc, string styleName)
@@ -1048,27 +1149,45 @@ namespace DocuLint
 
             try
             {
-                return doc.Styles[styleName] != null;
+                if (doc.Styles[styleName] != null)
+                {
+                    return true;
+                }
             }
             catch
             {
-                return false;
             }
+
+            // 已由“加载样式库”读出的本地样式名可避免 Word 样式索引偶发查找失败。
+            return GetCachedHeadingStyleNames(GetCommonStylesDocumentKey(doc))
+                .Any(name => string.Equals(name, styleName, StringComparison.OrdinalIgnoreCase));
         }
 
-        private static Word.WdParagraphAlignment ToWordParagraphAlignment(int alignment)
+        private static bool TrySetDocumentParagraphStyle(
+            Word.Document doc,
+            Word.Range range,
+            string styleName)
         {
-            switch (alignment)
+            if (doc == null || range == null || string.IsNullOrWhiteSpace(styleName))
             {
-                case 1:
-                    return Word.WdParagraphAlignment.wdAlignParagraphCenter;
-                case 2:
-                    return Word.WdParagraphAlignment.wdAlignParagraphRight;
-                case 3:
-                    return Word.WdParagraphAlignment.wdAlignParagraphJustify;
-                default:
-                    return Word.WdParagraphAlignment.wdAlignParagraphLeft;
+                return false;
             }
+
+            try
+            {
+                Word.Style style = doc.Styles[styleName];
+                if (style != null)
+                {
+                    object styleValue = style;
+                    range.set_Style(ref styleValue);
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            return TrySetStyle(range, styleName);
         }
 
         private static StyleDefinitionRequest GetStyleDefinitionForOutlineLevel(int level)
@@ -1553,10 +1672,49 @@ namespace DocuLint
             }
         }
 
-        internal static void ResetOperationCancellation()
+        private static void UpdateCurrentStyleStatusBar(Word.Application app, string styleName)
+        {
+            if (app == null)
+            {
+                return;
+            }
+
+            try
+            {
+                app.StatusBar = string.IsNullOrWhiteSpace(styleName)
+                    ? "当前样式：未读取"
+                    : "当前样式：" + styleName.Trim();
+            }
+            catch
+            {
+            }
+        }
+
+        internal static void ResetOperationCancellation(string operationName = null)
         {
             operationCancelRequested = false;
             EnsureStopShortcutHook();
+
+            if (!string.IsNullOrWhiteSpace(operationName))
+            {
+                TryShowCancellableOperationHint(Globals.ThisAddIn?.Application, operationName);
+            }
+        }
+
+        private static void TryShowCancellableOperationHint(Word.Application app, string operationName)
+        {
+            if (app == null || string.IsNullOrWhiteSpace(operationName))
+            {
+                return;
+            }
+
+            try
+            {
+                app.StatusBar = "按 ESC 取消：" + operationName.Trim();
+            }
+            catch
+            {
+            }
         }
 
         internal static void RequestOperationCancellation()
@@ -1652,6 +1810,30 @@ namespace DocuLint
 
             styleDefinitions = StyleDefinitionRequest.CreateDefaultSet()
                 .ToDictionary(item => item.Level, CloneStyleDefinition);
+        }
+
+        // 大纲编号仍使用独立的默认字体定义，避免与常用样式选择产生耦合。
+        private static StyleDefinitionRequest CloneStyleDefinition(StyleDefinitionRequest definition)
+        {
+            if (definition == null)
+            {
+                return null;
+            }
+
+            return new StyleDefinitionRequest
+            {
+                Level = definition.Level,
+                OutlineLevel = definition.OutlineLevel,
+                ShouldCreate = definition.ShouldCreate,
+                StyleName = definition.StyleName,
+                FontName = definition.FontName,
+                FontSize = definition.FontSize,
+                ListFontName = definition.ListFontName,
+                ListFontSize = definition.ListFontSize,
+                Alignment = definition.Alignment,
+                Bold = definition.Bold,
+                LineSpacing = definition.LineSpacing
+            };
         }
 
         private static bool IsDesignTime()

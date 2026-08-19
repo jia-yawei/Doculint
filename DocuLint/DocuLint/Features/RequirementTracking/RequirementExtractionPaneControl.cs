@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using System.Xml.Linq;
 using Office = Microsoft.Office.Core;
@@ -16,17 +15,24 @@ namespace DocuLint
         private const string SavedRequirementsNamespace = "urn:doculint:requirement-extraction";
         private readonly Func<Word.Application> applicationAccessor;
         private readonly DataGridView grid;
+        private readonly FlowLayoutPanel normalModeActions;
+        private readonly FlowLayoutPanel customModeActions;
+        private readonly TabControl extractionModeTabs;
         private readonly Button btnRefresh;
-        private readonly CheckBox chkMarkerFilterEnabled;
-        private readonly TextBox txtMarkerIdentifiers;
+        private readonly Button btnCustomBatchExtraction;
+        private readonly Button btnCustomSave;
+        private readonly ComboBox cmbCustomExtractionMode;
         private readonly Button btnExtractionEnabled;
         private readonly Button btnBatchExtraction;
+        private readonly Button btnClearSelected;
         private readonly Button btnClearAll;
-        private readonly Button btnDeleteSavedResults;
+        private readonly Button btnDelete;
         private readonly Button btnSave;
         private readonly Label lblStatus;
         private readonly ToolTip toolTip;
         private readonly ContextMenuStrip gridContextMenu;
+        private readonly ToolStripMenuItem insertCustomRowAboveMenuItem;
+        private readonly ToolStripMenuItem insertCustomRowBelowMenuItem;
         private Word.Document currentDocument;
         private readonly List<RequirementItem> requirements = new List<RequirementItem>();
         private readonly HashSet<string> excludedRequirementIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -34,6 +40,25 @@ namespace DocuLint
         private bool batchExtractionEnabled;
         private bool hasUnsavedChanges;
         private bool suppressGridValueChanged;
+        private bool customMode;
+        private bool customBatchExtractionEnabled;
+        private bool customAlternatingExpectsIdentifier = true;
+        private bool updatingExtractionViewMode;
+        private List<string> extractionMarkerTemplates = new List<string>();
+        private bool extractionUseCustomTemplates;
+        private DocumentMarkerDocumentType extractionPresetTemplateType = DocumentMarkerDocumentType.Unknown;
+        private bool extractionMarkerPageRangeEnabled;
+        private int extractionMarkerStartPage = 1;
+        private int extractionMarkerEndPage = 1;
+        private int extractionSectionNumberLevel;
+        private bool extractionScanFieldResults;
+
+        private enum CustomExtractionMode
+        {
+            IdentifierOnly,
+            NameOnly,
+            Alternating
+        }
 
         internal event Action<int> RequirementActivated;
         internal event Action<bool> BatchExtractionModeChanged;
@@ -79,108 +104,144 @@ namespace DocuLint
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 1,
-                RowCount = 2,
+                RowCount = 3,
                 Margin = new Padding(0, 0, 0, 8)
             };
             toolbar.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             toolbar.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            toolbar.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             EnableDoubleBuffering(toolbar);
 
-            TableLayoutPanel primaryActions = new TableLayoutPanel
+            FlowLayoutPanel viewModeSelector = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                MinimumSize = new Size(0, 42),
-                BackColor = Color.FromArgb(245, 247, 250),
-                ColumnCount = 5,
-                RowCount = 1,
-                Margin = new Padding(0, 0, 0, 6)
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = true,
+                Padding = new Padding(0, 0, 0, 4),
+                Margin = Padding.Empty
             };
-            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 15f));
-            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 12f));
-            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32f));
-            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 18f));
-            primaryActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 23f));
+            TabPage normalExtractionTab = new TabPage("常规提取")
+            {
+                BackColor = Color.White,
+                Padding = Padding.Empty
+            };
+            TabPage customExtractionTab = new TabPage("自定义提取")
+            {
+                BackColor = Color.White,
+                Padding = Padding.Empty
+            };
+            extractionModeTabs = new TabControl
+            {
+                Size = new Size(216, 34),
+                Padding = new Point(10, 4),
+                Appearance = TabAppearance.Normal,
+                HotTrack = true,
+                Margin = new Padding(0, 0, 8, 0)
+            };
+            extractionModeTabs.TabPages.Add(normalExtractionTab);
+            extractionModeTabs.TabPages.Add(customExtractionTab);
+            extractionModeTabs.SelectedIndexChanged += (_, __) =>
+            {
+                if (!updatingExtractionViewMode)
+                {
+                    SetCustomMode(extractionModeTabs.SelectedIndex == 1, true);
+                }
+            };
+            viewModeSelector.Controls.Add(extractionModeTabs);
 
-            FlowLayoutPanel modeActions = new FlowLayoutPanel
+            normalModeActions = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 MinimumSize = new Size(0, 38),
                 FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
+                WrapContents = true,
                 Padding = new Padding(0, 2, 0, 4),
                 Margin = Padding.Empty
             };
-            toolbar.Controls.Add(primaryActions, 0, 0);
-            toolbar.Controls.Add(modeActions, 0, 1);
-
-            btnRefresh = CreateButton("重新提取");
-            btnRefresh.Click += (_, __) => ReloadCurrentDocumentRequirements();
-            chkMarkerFilterEnabled = new CheckBox
+            customModeActions = new FlowLayoutPanel
             {
+                Dock = DockStyle.Top,
                 AutoSize = true,
-                Anchor = AnchorStyles.Left,
-                Text = "启用过滤",
-                Margin = new Padding(6, 0, 0, 0),
-                Font = new Font("Microsoft YaHei UI", 9F),
-                ForeColor = Color.FromArgb(54, 63, 75),
-                UseVisualStyleBackColor = true
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                MinimumSize = new Size(0, 38),
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = true,
+                Padding = new Padding(0, 2, 0, 4),
+                Margin = Padding.Empty,
+                Visible = false
             };
-            txtMarkerIdentifiers = new TextBox
+            toolbar.Controls.Add(viewModeSelector, 0, 0);
+            toolbar.Controls.Add(normalModeActions, 0, 1);
+            toolbar.Controls.Add(customModeActions, 0, 2);
+
+            btnRefresh = CreateButton("加载标识");
+            btnRefresh.Click += (_, __) => ReloadCurrentDocumentRequirements();
+            cmbCustomExtractionMode = new ComboBox
             {
-                Dock = DockStyle.Fill,
-                Margin = new Padding(2, 9, 6, 7),
-                ReadOnly = true,
-                TabStop = false,
-                Visible = false,
-                BackColor = Color.FromArgb(242, 244, 247)
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font("Microsoft YaHei UI", 9F),
+                Width = 128,
+                Height = 32,
+                Margin = new Padding(0, 1, 8, 1)
             };
-            txtMarkerIdentifiers.HandleCreated += (_, __) => SetCueBanner(
-                txtMarkerIdentifiers,
-                "例如：SRS SDS SDD");
-            chkMarkerFilterEnabled.CheckedChanged += (_, __) =>
-                SetMarkerFilterEnabled(chkMarkerFilterEnabled.Checked);
-            btnExtractionEnabled = CreateButton("开始提取");
-            btnExtractionEnabled.Click += (_, __) => SetExtractionEnabled(!extractionEnabled);
-            btnBatchExtraction = CreateButton("批量提取");
-            btnBatchExtraction.Click += (_, __) => SetBatchExtractionMode(!batchExtractionEnabled);
+            cmbCustomExtractionMode.Items.AddRange(new object[] { "仅标识", "仅名称", "交替" });
+            cmbCustomExtractionMode.SelectedIndex = (int)CustomExtractionMode.Alternating;
+            cmbCustomExtractionMode.SelectedIndexChanged += (_, __) =>
+            {
+                customAlternatingExpectsIdentifier = true;
+                if (customMode)
+                {
+                    SetStatus("已切换提取方式；交替模式将从标识开始");
+                }
+            };
+            btnCustomBatchExtraction = CreateButton("开始批量提取");
+            btnCustomBatchExtraction.Click += (_, __) => SetCustomBatchExtractionEnabled(!customBatchExtractionEnabled);
+            btnCustomSave = CreateButton("保存");
+            btnCustomSave.Click += (_, __) => SaveToCurrentDocument();
+            btnExtractionEnabled = CreateButton("开始批量提取");
+            btnBatchExtraction = CreateButton("开始批量提取");
+            btnBatchExtraction.Click += (_, __) => SetRegularBatchExtraction(!BatchExtractionEnabled);
+            btnClearSelected = CreateButton("清除");
+            btnClearSelected.BackColor = Color.FromArgb(177, 63, 63);
+            btnClearSelected.FlatAppearance.MouseOverBackColor = Color.FromArgb(196, 76, 76);
+            btnClearSelected.FlatAppearance.MouseDownBackColor = Color.FromArgb(151, 49, 49);
+            btnClearSelected.Click += (_, __) => ClearSelectedRequirementContent();
             btnClearAll = CreateButton("全部清空");
             btnClearAll.BackColor = Color.FromArgb(177, 63, 63);
             btnClearAll.FlatAppearance.MouseOverBackColor = Color.FromArgb(196, 76, 76);
             btnClearAll.FlatAppearance.MouseDownBackColor = Color.FromArgb(151, 49, 49);
             btnClearAll.Click += (_, __) => ClearAllRequirements();
-            btnDeleteSavedResults = CreateButton("删除结果");
-            btnDeleteSavedResults.BackColor = Color.FromArgb(177, 63, 63);
-            btnDeleteSavedResults.FlatAppearance.MouseOverBackColor = Color.FromArgb(196, 76, 76);
-            btnDeleteSavedResults.FlatAppearance.MouseDownBackColor = Color.FromArgb(151, 49, 49);
-            btnDeleteSavedResults.Click += (_, __) => DeleteSavedResults();
+            btnDelete = CreateButton("删除");
+            btnDelete.BackColor = Color.FromArgb(177, 63, 63);
+            btnDelete.FlatAppearance.MouseOverBackColor = Color.FromArgb(196, 76, 76);
+            btnDelete.FlatAppearance.MouseDownBackColor = Color.FromArgb(151, 49, 49);
+            btnDelete.Click += (_, __) => DeleteSavedResults();
             btnSave = CreateButton("保存");
             btnSave.Click += (_, __) => SaveToCurrentDocument();
             ApplySecondaryButtonStyle(btnExtractionEnabled);
             ApplySecondaryButtonStyle(btnBatchExtraction);
-            Label markerFilterLabel = CreateToolbarLabel("标识过滤");
-            markerFilterLabel.Anchor = AnchorStyles.Left;
-            markerFilterLabel.Margin = new Padding(4, 0, 4, 0);
-            primaryActions.Controls.Add(chkMarkerFilterEnabled, 0, 0);
-            primaryActions.Controls.Add(markerFilterLabel, 1, 0);
-            primaryActions.Controls.Add(txtMarkerIdentifiers, 2, 0);
-            PlaceToolbarButton(btnRefresh, primaryActions, 3, 0);
-            PlaceToolbarButton(btnSave, primaryActions, 4, 0);
-            PlaceToolbarButton(btnExtractionEnabled, modeActions, 100);
-            PlaceToolbarButton(btnBatchExtraction, modeActions, 156);
-            PlaceToolbarButton(btnClearAll, modeActions, 100);
-            PlaceToolbarButton(btnDeleteSavedResults, modeActions, 100);
-            toolTip.SetToolTip(btnRefresh, "按当前过滤规则重新扫描文档，并恢复之前删除的标识");
-            toolTip.SetToolTip(chkMarkerFilterEnabled, "启用后，仅加载符合过滤规则的标识");
-            toolTip.SetToolTip(txtMarkerIdentifiers, "最多输入 3 种标识，例如 SRS SDS SDD；多个标识之间使用空格");
-            toolTip.SetToolTip(btnExtractionEnabled, "开启后，在文档中选中文字可进行提取");
-            toolTip.SetToolTip(btnBatchExtraction, "开启后，选中文字会自动写入当前需求行");
+            PlaceToolbarButton(btnRefresh, viewModeSelector, 122);
+            PlaceToolbarButton(btnBatchExtraction, normalModeActions, 146);
+            PlaceToolbarButton(btnClearSelected, normalModeActions, 72);
+            PlaceToolbarButton(btnClearAll, normalModeActions, 124);
+            PlaceToolbarButton(btnDelete, normalModeActions, 64);
+            PlaceToolbarButton(btnSave, normalModeActions, 64);
+            customModeActions.Controls.Add(cmbCustomExtractionMode);
+            PlaceToolbarButton(btnCustomBatchExtraction, customModeActions, 160);
+            PlaceToolbarButton(btnCustomSave, customModeActions, 78);
+            toolTip.SetToolTip(btnRefresh, "按当前文档类型加载或更新标识，并保留已提取的内容");
+            toolTip.SetToolTip(btnBatchExtraction, "点击后开启批量提取；选择文档文字会自动写入当前需求行");
+            toolTip.SetToolTip(btnClearSelected, "清除当前选中需求的名称和章节号，保留需求标识");
             toolTip.SetToolTip(btnClearAll, "清空全部需求名称和章节号，保留需求标识");
-            toolTip.SetToolTip(btnDeleteSavedResults, "删除当前 Word 文档中已保存的需求提取结果");
+            toolTip.SetToolTip(btnDelete, "删除全部需求提取结果；删除后需重新点击加载标识");
             toolTip.SetToolTip(btnSave, "将当前需求表保存到 Word 文档");
+            toolTip.SetToolTip(extractionModeTabs, "切换常规提取和自定义提取界面");
+            toolTip.SetToolTip(cmbCustomExtractionMode, "选择选区写入需求标识、需求名称，或按标识与名称交替写入");
+            toolTip.SetToolTip(btnCustomBatchExtraction, "开启后，选择文档文字会按当前方式自动写入需求表");
 
             grid = new DataGridView
             {
@@ -206,7 +267,7 @@ namespace DocuLint
             grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(238, 242, 247);
             grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(32, 45, 64);
             grid.ColumnHeadersDefaultCellStyle.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-            grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleCenter;
+            grid.ColumnHeadersDefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleLeft;
             grid.DefaultCellStyle.Font = new Font("Microsoft YaHei UI", 9F);
             grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(224, 238, 255);
             grid.DefaultCellStyle.SelectionForeColor = Color.Black;
@@ -218,7 +279,7 @@ namespace DocuLint
             {
                 if (e.RowIndex >= 0 && e.RowIndex < requirements.Count)
                 {
-                    if (e.ColumnIndex == 1 || e.ColumnIndex == 2)
+                    if (customMode || e.ColumnIndex == 1 || e.ColumnIndex == 2)
                     {
                         grid.CurrentCell = grid.Rows[e.RowIndex].Cells[e.ColumnIndex];
                         grid.BeginEdit(true);
@@ -229,6 +290,16 @@ namespace DocuLint
                     }
                 }
             };
+            grid.CellClick += (_, e) =>
+            {
+                if (!customMode &&
+                    e.RowIndex >= 0 &&
+                    e.RowIndex < requirements.Count &&
+                    e.ColumnIndex == 0)
+                {
+                    NavigateToRequirement(requirements[e.RowIndex]);
+                }
+            };
             grid.CellValueChanged += Grid_CellValueChanged;
             grid.CellMouseDown += Grid_CellMouseDown;
             grid.KeyDown += Grid_KeyDown;
@@ -236,7 +307,14 @@ namespace DocuLint
             gridContextMenu = new ContextMenuStrip();
             ToolStripMenuItem deleteRequirementMenuItem = new ToolStripMenuItem("删除选中标识");
             deleteRequirementMenuItem.Click += (_, __) => DeleteSelectedRequirement();
+            insertCustomRowAboveMenuItem = new ToolStripMenuItem("在上方插入行");
+            insertCustomRowAboveMenuItem.Click += (_, __) => InsertCustomRow(false);
+            insertCustomRowBelowMenuItem = new ToolStripMenuItem("在下方插入行");
+            insertCustomRowBelowMenuItem.Click += (_, __) => InsertCustomRow(true);
             gridContextMenu.Items.Add(deleteRequirementMenuItem);
+            gridContextMenu.Items.Add(new ToolStripSeparator());
+            gridContextMenu.Items.Add(insertCustomRowAboveMenuItem);
+            gridContextMenu.Items.Add(insertCustomRowBelowMenuItem);
             grid.ContextMenuStrip = gridContextMenu;
 
             lblStatus = new Label
@@ -264,26 +342,36 @@ namespace DocuLint
             }
 
             currentDocument = doc;
+            // 每次打开需求提取窗格默认显示常规提取；已保存的自定义结果仍可通过模式下拉框查看。
+            SetCustomMode(false, false);
             requirements.Clear();
             excludedRequirementIds.Clear();
             requirements.AddRange(LoadSavedRequirementItems(doc));
+            RestoreRequirementPositions(doc);
             excludedRequirementIds.UnionWith(LoadExcludedRequirementIds(doc));
             RenderRows();
             hasUnsavedChanges = false;
+            UpdateExtractionActionLabel(doc);
             ApplyBatchExtractionState(batchExtractionEnabled);
             if (requirements.Count > 0)
             {
-                SetStatus($"已显示文档中保存的 {requirements.Count} 个需求标识；点击“重新提取”可重新扫描文档");
+                SetStatus($"已显示文档中保存的 {requirements.Count} 个需求标识；点击“更新提取”可同步文档新增标识");
                 SelectRow(0);
             }
             else
             {
-                SetStatus("当前文档没有已保存的需求提取结果；点击“重新提取”扫描标识");
+                SetStatus("当前文档没有已保存的需求提取结果；点击“加载标识”扫描标识");
             }
         }
 
         internal void ReloadCurrentDocumentRequirements()
         {
+            if (customMode)
+            {
+                SetStatus("自定义提取不自动加载标识；请开启批量提取并在文档中选择文字");
+                return;
+            }
+
             Word.Application app = applicationAccessor?.Invoke();
             Word.Document doc = app?.ActiveDocument;
             if (doc == null)
@@ -293,47 +381,50 @@ namespace DocuLint
             }
 
             currentDocument = doc;
+            bool hasExistingResults = requirements.Any(item => item != null && !string.IsNullOrWhiteSpace(item.Id));
             Office.CustomXMLPart savedPart = FindSavedRequirementPart(doc);
-            if (savedPart != null && ContainsSavedRequirement(savedPart))
+            if (!hasExistingResults && savedPart != null && ContainsSavedRequirement(savedPart))
+            {
+                hasExistingResults = true;
+            }
+
+            if (hasExistingResults)
             {
                 DialogResult result = MessageBox.Show(
-                    "重新提取后再次保存会覆盖当前提取结果，是否继续？",
-                    "重新提取",
+                    "更新提取后再次保存会覆盖当前提取结果，原有需求名称和章节号会尽量按标识变化迁移，是否继续？",
+                    "更新提取",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Warning);
                 if (result != DialogResult.Yes)
                 {
-                    SetStatus("已取消重新提取，当前提取结果未改变");
+                    SetStatus("已取消更新提取，当前提取结果未改变");
                     return;
                 }
             }
 
-            SetStatus("正在提取需求标识...");
+            SetStatus(hasExistingResults ? "正在更新提取结果..." : "正在加载需求标识...");
             try
             {
-                bool markerFilterEnabled = chkMarkerFilterEnabled.Checked;
-                List<string> markerIdentifiers = markerFilterEnabled
-                    ? ParseMarkerIdentifiers(txtMarkerIdentifiers.Text)
-                    : new List<string>();
-                if (markerFilterEnabled && markerIdentifiers.Count == 0)
-                {
-                    SetStatus("请设置标识过滤规则");
-                    MessageBox.Show("请输入至少一种标识，例如 SRS SDS SDD；多个标识之间使用空格。", "需求提取");
-                    txtMarkerIdentifiers.Focus();
-                    return;
-                }
-
-                if (markerIdentifiers.Count > 3)
-                {
-                    SetStatus("最多只能指定 3 种标识");
-                    MessageBox.Show("最多只能输入 3 种标识，例如 SRS SDS SDD；多个标识之间使用空格。", "需求提取");
-                    return;
-                }
-
                 DocumentMarkerCollectionResult markerResult = DocumentMarkerService.CollectMarkers(
                     doc,
-                    markerIdentifiers);
-                Dictionary<string, RequirementItem> saved = LoadSavedRequirements(doc);
+                    extractionUseCustomTemplates ? GetConfiguredMarkerTemplates() : Enumerable.Empty<string>(),
+                    extractionMarkerPageRangeEnabled ? extractionMarkerStartPage : 0,
+                    extractionMarkerPageRangeEnabled ? extractionMarkerEndPage : 0,
+                    GetEffectivePresetTemplateType(doc),
+                    extractionScanFieldResults);
+                List<RequirementItem> saved = requirements
+                    .Where(item => item != null && !string.IsNullOrWhiteSpace(item.Id))
+                    .Select(item => new RequirementItem
+                    {
+                        Id = item.Id,
+                        Name = item.Name,
+                        SectionNumber = item.SectionNumber
+                    })
+                    .ToList();
+                if (saved.Count == 0)
+                {
+                    saved = LoadSavedRequirementItems(doc);
+                }
                 requirements.Clear();
                 excludedRequirementIds.Clear();
                 requirements.AddRange((markerResult.Entries ?? new List<NavigationPaneEntry>())
@@ -350,9 +441,9 @@ namespace DocuLint
                 MergeSavedRequirements(saved);
                 RenderRows();
                 hasUnsavedChanges = true;
+                UpdateExtractionActionLabel(doc);
                 ApplyBatchExtractionState(batchExtractionEnabled);
-                string scope = BuildMarkerScopeDescription(markerFilterEnabled, markerIdentifiers.Count);
-                SetStatus($"已加载 {requirements.Count} 个需求标识（{scope}）；右键或按 Delete 可删除不需要的标识");
+                SetStatus($"已更新 {requirements.Count} 个需求标识；右键或按 Delete 可删除不需要的标识");
                 SelectRowAndNavigate(FindNextUnfilledRow(0));
             }
             catch (Exception ex)
@@ -366,7 +457,7 @@ namespace DocuLint
         {
             if (!extractionEnabled)
             {
-                MessageBox.Show("请先勾选“开始提取”。", "需求提取");
+                MessageBox.Show("请先点击“开始批量提取”。", "需求提取");
                 return;
             }
 
@@ -375,12 +466,131 @@ namespace DocuLint
 
         internal bool TryAutoAddSelection()
         {
+            if (customMode)
+            {
+                return customBatchExtractionEnabled && TryAddSelectionAsCustomRequirement();
+            }
+
             return extractionEnabled && TryAddSelectionAsRequirement(true);
         }
 
-        internal bool ExtractionEnabled => extractionEnabled;
+        internal bool ExtractionEnabled => customMode ? customBatchExtractionEnabled : extractionEnabled;
 
-        internal bool BatchExtractionEnabled => extractionEnabled && batchExtractionEnabled;
+        internal bool BatchExtractionEnabled => customMode
+            ? customBatchExtractionEnabled
+            : extractionEnabled && batchExtractionEnabled;
+
+        private void SetCustomMode(bool enabled, bool userInitiated)
+        {
+            if (customMode == enabled)
+            {
+                ApplyCustomModeState();
+                return;
+            }
+
+            if (customMode)
+            {
+                SetCustomBatchExtractionEnabled(false);
+            }
+            else if (extractionEnabled)
+            {
+                SetExtractionEnabled(false);
+            }
+
+            customMode = enabled;
+            customAlternatingExpectsIdentifier = true;
+            ApplyCustomModeState();
+            if (!userInitiated)
+            {
+                return;
+            }
+
+            SetStatus(customMode
+                ? "自定义提取：选择“交替”时将先提取标识，再提取名称"
+                : "已退出自定义模式；可点击“更新提取”同步文档标识");
+        }
+
+        private void ApplyCustomModeState()
+        {
+            normalModeActions.Visible = !customMode;
+            customModeActions.Visible = customMode;
+            btnRefresh.Visible = !customMode;
+            btnSave.Visible = !customMode;
+
+            updatingExtractionViewMode = true;
+            try
+            {
+                extractionModeTabs.SelectedIndex = customMode ? 1 : 0;
+            }
+            finally
+            {
+                updatingExtractionViewMode = false;
+            }
+
+            if (grid != null)
+            {
+                grid.ReadOnly = false;
+                if (grid.Columns.Contains("Id"))
+                {
+                    grid.Columns["Id"].ReadOnly = !customMode;
+                }
+
+                if (grid.Columns.Contains("Name"))
+                {
+                    grid.Columns["Name"].ReadOnly = false;
+                }
+
+                if (grid.Columns.Contains("SectionNumber"))
+                {
+                    grid.Columns["SectionNumber"].ReadOnly = false;
+                }
+            }
+
+            insertCustomRowAboveMenuItem.Enabled = customMode;
+            insertCustomRowBelowMenuItem.Enabled = customMode;
+
+        }
+
+        private void SetCustomBatchExtractionEnabled(bool enabled)
+        {
+            if (customBatchExtractionEnabled == enabled)
+            {
+                return;
+            }
+
+            customBatchExtractionEnabled = enabled;
+            btnCustomBatchExtraction.Text = enabled ? "结束批量提取" : "开始批量提取";
+            btnCustomBatchExtraction.BackColor = enabled ? Color.FromArgb(35, 138, 79) : Color.FromArgb(43, 108, 176);
+            BatchExtractionModeChanged?.Invoke(enabled);
+            ExtractionModeChanged?.Invoke(enabled);
+            SetStatus(enabled
+                ? "自定义批量提取已开启：在文档中选择文字即可写入需求表"
+                : "自定义批量提取已关闭");
+        }
+
+        private void InsertCustomRow(bool belowCurrentRow)
+        {
+            if (!customMode)
+            {
+                return;
+            }
+
+            int currentRow = GetCurrentRowIndex();
+            if (currentRow < 0 || currentRow >= requirements.Count)
+            {
+                SetStatus("请先选中一行，再选择插入位置");
+                return;
+            }
+
+            int insertIndex = belowCurrentRow ? currentRow + 1 : currentRow;
+            requirements.Insert(insertIndex, new RequirementItem());
+            hasUnsavedChanges = true;
+            RenderRows();
+            SelectRow(insertIndex);
+            grid.CurrentCell = grid.Rows[insertIndex].Cells[0];
+            grid.BeginEdit(true);
+            SetStatus(belowCurrentRow ? "已在当前行下方插入行" : "已在当前行上方插入行");
+        }
 
         private void SetExtractionEnabled(bool enabled)
         {
@@ -390,7 +600,6 @@ namespace DocuLint
             }
 
             extractionEnabled = enabled;
-            btnBatchExtraction.Enabled = enabled;
             if (!enabled)
             {
                 SetBatchExtractionMode(false);
@@ -400,8 +609,36 @@ namespace DocuLint
             ApplyExtractionButtonState();
 
             SetStatus(enabled
-                ? "开始提取已开启：在左侧文档中选中文字后可点击“提取”"
-                : "开始提取已关闭");
+                ? "常规提取已开启：可在文档中选择文字后填入当前行"
+                : "常规提取已关闭");
+        }
+
+        private void SetRegularBatchExtraction(bool enabled)
+        {
+            if (enabled == (extractionEnabled && batchExtractionEnabled))
+            {
+                return;
+            }
+
+            if (enabled)
+            {
+                extractionEnabled = true;
+                batchExtractionEnabled = true;
+                ExtractionModeChanged?.Invoke(true);
+                BatchExtractionModeChanged?.Invoke(true);
+            }
+            else
+            {
+                batchExtractionEnabled = false;
+                extractionEnabled = false;
+                BatchExtractionModeChanged?.Invoke(false);
+                ExtractionModeChanged?.Invoke(false);
+            }
+
+            ApplyExtractionButtonState();
+            SetStatus(enabled
+                ? "批量提取已开启：在文档中选择文字会自动写入当前行"
+                : "批量提取已关闭");
         }
 
         internal void SetBatchExtractionMode(bool enabled)
@@ -427,7 +664,7 @@ namespace DocuLint
 
             SetStatus(enabled
                 ? "批量提取已开启：在左侧文档中选中文字后会自动写入当前行"
-                : "批量提取已关闭：选中文字后可手动点击“提取”");
+                : "批量提取已关闭");
         }
 
         private bool TryAddSelectionAsRequirement(bool autoMode)
@@ -461,6 +698,7 @@ namespace DocuLint
             {
                 sectionNumber = RequirementTrackingWordService.ResolveNearestSectionNumber(doc, range.Start);
             }
+            sectionNumber = TruncateSectionNumber(sectionNumber, extractionSectionNumberLevel);
             int rowIndex = GetCurrentRowIndex();
             if (rowIndex < 0)
             {
@@ -484,6 +722,104 @@ namespace DocuLint
             return true;
         }
 
+        private bool TryAddSelectionAsCustomRequirement()
+        {
+            Word.Application app = applicationAccessor?.Invoke();
+            Word.Selection selection = app?.Selection;
+            Word.Range range = selection?.Range;
+            if (range == null || range.Start == range.End)
+            {
+                return false;
+            }
+
+            string text = CleanText(range.Text);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            Word.Document doc = selection.Document ?? currentDocument;
+            currentDocument = doc;
+            string sectionNumber = RequirementTrackingWordService.ResolveCurrentHeadingNumber(selection);
+            if (string.IsNullOrWhiteSpace(sectionNumber))
+            {
+                sectionNumber = RequirementTrackingWordService.ResolveNearestSectionNumber(doc, range.Start);
+            }
+            sectionNumber = TruncateSectionNumber(sectionNumber, extractionSectionNumberLevel);
+
+            CustomExtractionMode mode = (CustomExtractionMode)Math.Max(0, cmbCustomExtractionMode.SelectedIndex);
+            RequirementItem item;
+            switch (mode)
+            {
+                case CustomExtractionMode.IdentifierOnly:
+                    item = CreateCustomRequirement(range.Start, sectionNumber);
+                    item.Id = text;
+                    SetStatus($"已提取标识：{text}");
+                    break;
+                case CustomExtractionMode.NameOnly:
+                    item = requirements.FirstOrDefault(candidate =>
+                        candidate != null &&
+                        !string.IsNullOrWhiteSpace(candidate.Id) &&
+                        string.IsNullOrWhiteSpace(candidate.Name));
+                    if (item == null)
+                    {
+                        SetStatus("没有待填写名称的标识；请先提取标识或使用交替方式");
+                        return false;
+                    }
+
+                    item.Name = text;
+                    item.SectionNumber = sectionNumber;
+                    item.Start = range.Start;
+                    item.BookmarkOrRange = range.Start;
+                    SetStatus($"已提取名称：{text}");
+                    break;
+                default:
+                    if (customAlternatingExpectsIdentifier)
+                    {
+                        item = CreateCustomRequirement(range.Start, sectionNumber);
+                        item.Id = text;
+                        customAlternatingExpectsIdentifier = false;
+                        SetStatus($"已提取标识：{text}；下一次将提取名称");
+                    }
+                    else
+                    {
+                        item = requirements.LastOrDefault(candidate =>
+                            candidate != null &&
+                            !string.IsNullOrWhiteSpace(candidate.Id) &&
+                            string.IsNullOrWhiteSpace(candidate.Name));
+                        if (item == null)
+                        {
+                            item = CreateCustomRequirement(range.Start, sectionNumber);
+                        }
+
+                        item.Name = text;
+                        item.SectionNumber = sectionNumber;
+                        item.Start = range.Start;
+                        item.BookmarkOrRange = range.Start;
+                        customAlternatingExpectsIdentifier = true;
+                        SetStatus($"已提取名称：{text}；下一次将提取标识");
+                    }
+                    break;
+            }
+
+            hasUnsavedChanges = true;
+            RenderRows();
+            SelectRow(requirements.IndexOf(item));
+            return true;
+        }
+
+        private RequirementItem CreateCustomRequirement(int start, string sectionNumber)
+        {
+            RequirementItem item = new RequirementItem
+            {
+                Start = start,
+                BookmarkOrRange = start,
+                SectionNumber = sectionNumber ?? string.Empty
+            };
+            requirements.Add(item);
+            return item;
+        }
+
         private void DeleteSelectedRequirement()
         {
             int rowIndex = GetCurrentRowIndex();
@@ -495,7 +831,7 @@ namespace DocuLint
 
             RequirementItem item = requirements[rowIndex];
             string removedId = item.Id ?? string.Empty;
-            if (!string.IsNullOrWhiteSpace(removedId))
+            if (!customMode && !string.IsNullOrWhiteSpace(removedId))
             {
                 excludedRequirementIds.Add(removedId);
             }
@@ -556,6 +892,32 @@ namespace DocuLint
             SetStatus($"已清空 {populatedCount} 条需求的名称和章节号，需求标识已保留；点击“保存”后写入当前文档");
         }
 
+        private void ClearSelectedRequirementContent()
+        {
+            SyncGridToRequirements();
+            int rowIndex = GetCurrentRowIndex();
+            if (rowIndex < 0 || rowIndex >= requirements.Count)
+            {
+                SetStatus("请先选择需要清除的需求行");
+                return;
+            }
+
+            RequirementItem item = requirements[rowIndex];
+            if (item == null ||
+                (string.IsNullOrWhiteSpace(item.Name) && string.IsNullOrWhiteSpace(item.SectionNumber)))
+            {
+                SetStatus("当前选中需求没有可清除的名称或章节号");
+                return;
+            }
+
+            item.Name = string.Empty;
+            item.SectionNumber = string.Empty;
+            RenderRows();
+            hasUnsavedChanges = true;
+            SelectRow(rowIndex);
+            SetStatus($"已清除需求标识 {item.Id} 的名称和章节号；点击“保存”后写入当前文档");
+        }
+
         private void DeleteSavedResults()
         {
             Word.Document doc = currentDocument ?? applicationAccessor?.Invoke()?.ActiveDocument;
@@ -566,15 +928,15 @@ namespace DocuLint
             }
 
             List<string> savedPartIds = FindSavedRequirementPartIds(doc);
-            if (savedPartIds.Count == 0)
+            if (savedPartIds.Count == 0 && requirements.Count == 0)
             {
-                SetStatus("当前文档没有已保存的需求提取结果");
+                SetStatus("当前没有可删除的需求提取结果");
                 return;
             }
 
             DialogResult result = MessageBox.Show(
-                "确认删除当前 Word 文档中已保存的需求提取结果吗？需求标识、名称和章节号都会从保存结果中删除。删除后还需要保存 Word 文档。",
-                "删除提取结果",
+                "确认删除全部需求提取结果吗？需求标识、名称和章节号都会被删除，之后必须重新点击“加载标识”。",
+                "删除",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning);
             if (result != DialogResult.Yes)
@@ -591,10 +953,10 @@ namespace DocuLint
                 {
                     MessageBox.Show(
                         $"仍有 {remainingCount} 份需求提取数据未能删除，请关闭其他需求窗格后重试。",
-                        "删除提取结果",
+                        "删除",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error);
-                    SetStatus("删除已保存的需求提取结果失败");
+                    SetStatus("删除需求提取结果失败");
                     return;
                 }
 
@@ -603,17 +965,108 @@ namespace DocuLint
                 excludedRequirementIds.Clear();
                 RenderRows();
                 hasUnsavedChanges = false;
-                SetStatus("已删除当前文档中保存的需求提取结果，请保存 Word 文档");
+                UpdateExtractionActionLabel(doc);
+                SetStatus("已删除全部需求提取结果；请重新点击“加载标识”");
             }
             catch (Exception ex)
             {
-                SetStatus("删除已保存的需求提取结果失败");
+                SetStatus("删除需求提取结果失败");
                 MessageBox.Show(
                     "删除需求提取结果失败：\r\n" + ex.Message,
-                    "删除提取结果",
+                    "删除",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
             }
+        }
+
+        internal void OpenExtractionSettings()
+        {
+            Word.Document doc = currentDocument ?? applicationAccessor?.Invoke()?.ActiveDocument;
+            DocumentMarkerDocumentType currentDocumentType = GetEffectivePresetTemplateType(doc);
+            using (RequirementExtractionSettingsForm form = new RequirementExtractionSettingsForm(
+                currentDocumentType,
+                extractionPresetTemplateType,
+                extractionUseCustomTemplates,
+                GetConfiguredMarkerTemplates(),
+                extractionMarkerPageRangeEnabled,
+                extractionMarkerStartPage,
+                extractionMarkerEndPage,
+                extractionSectionNumberLevel,
+                extractionScanFieldResults,
+                Globals.ThisAddIn?.PreserveForwardMappingsWhenReverseTracing ?? true))
+            {
+                if (form.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                extractionMarkerTemplates = form.Templates.ToList();
+                extractionUseCustomTemplates = form.UseCustomTemplates;
+                extractionPresetTemplateType = form.SelectedPresetTemplateType;
+                extractionMarkerPageRangeEnabled = form.LimitPages;
+                extractionMarkerStartPage = form.StartPage;
+                extractionMarkerEndPage = form.EndPage;
+                extractionSectionNumberLevel = form.SectionTruncationLevel;
+                extractionScanFieldResults = form.ScanFieldResults;
+                if (Globals.ThisAddIn != null)
+                {
+                    Globals.ThisAddIn.PreserveForwardMappingsWhenReverseTracing =
+                        form.PreserveForwardMappingsWhenReverseTracing;
+                }
+                SetStatus("提取设置仅在当前窗格打开期间生效；点击“加载标识”或“更新提取”后生效");
+            }
+        }
+
+        internal void ResetOneTimeExtractionSettings()
+        {
+            extractionMarkerTemplates.Clear();
+            extractionUseCustomTemplates = false;
+            extractionPresetTemplateType = DocumentMarkerDocumentType.Unknown;
+            extractionMarkerPageRangeEnabled = false;
+            extractionMarkerStartPage = 1;
+            extractionMarkerEndPage = 1;
+            extractionSectionNumberLevel = 0;
+            extractionScanFieldResults = false;
+        }
+
+        private List<string> GetConfiguredMarkerTemplates()
+        {
+            return extractionMarkerTemplates.ToList();
+        }
+
+        private DocumentMarkerDocumentType GetEffectivePresetTemplateType(Word.Document doc)
+        {
+            if (extractionPresetTemplateType == DocumentMarkerDocumentType.SystemSpecification ||
+                extractionPresetTemplateType == DocumentMarkerDocumentType.RequirementSpecification ||
+                extractionPresetTemplateType == DocumentMarkerDocumentType.SoftwareDesign)
+            {
+                return extractionPresetTemplateType;
+            }
+
+            DocumentMarkerDocumentType detectedType = DocumentMarkerService.DetectDocumentType(doc);
+            return detectedType == DocumentMarkerDocumentType.SystemSpecification ||
+                   detectedType == DocumentMarkerDocumentType.SoftwareDesign
+                ? detectedType
+                : DocumentMarkerDocumentType.RequirementSpecification;
+        }
+
+        private static string TruncateSectionNumber(string sectionNumber, int maxLevel)
+        {
+            string normalized = (sectionNumber ?? string.Empty).Trim();
+            if (maxLevel <= 0 || string.IsNullOrWhiteSpace(normalized))
+            {
+                return normalized;
+            }
+
+            string[] levels = normalized
+                .TrimEnd('.', '。', '、')
+                .Split(new[] { '.' }, StringSplitOptions.RemoveEmptyEntries);
+            if (levels.Length <= maxLevel || levels.Any(level => string.IsNullOrWhiteSpace(level)))
+            {
+                return normalized;
+            }
+
+            return string.Join(".", levels.Take(maxLevel));
         }
 
         internal void SaveToCurrentDocument()
@@ -631,6 +1084,7 @@ namespace DocuLint
                 DeleteSavedRequirementParts(doc);
                 doc.CustomXMLParts.Add(BuildSavedRequirementsXml());
                 hasUnsavedChanges = false;
+                UpdateExtractionActionLabel(doc);
                 SetStatus("需求提取结果已保存到当前文档，请保存 Word 文档");
             }
             catch (Exception ex)
@@ -638,50 +1092,6 @@ namespace DocuLint
                 MessageBox.Show($"保存失败: {ex.Message}", "需求提取");
             }
         }
-
-        private static List<string> ParseMarkerIdentifiers(string text)
-        {
-            return (text ?? string.Empty)
-                .Split(new[] { ',', '，', ';', '；', '\r', '\n', '\t', ' ' }, StringSplitOptions.RemoveEmptyEntries)
-                .Select(value => value.Trim())
-                .Where(value => value.Length > 0)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-        }
-
-        private static string BuildMarkerScopeDescription(bool markerFilterEnabled, int markerIdentifierCount)
-        {
-            return markerFilterEnabled
-                ? $"已过滤 {markerIdentifierCount} 种标识"
-                : "未启用过滤，使用默认标识";
-        }
-
-        private void SetMarkerFilterEnabled(bool enabled)
-        {
-            txtMarkerIdentifiers.Visible = enabled;
-            txtMarkerIdentifiers.ReadOnly = !enabled;
-            txtMarkerIdentifiers.TabStop = enabled;
-            txtMarkerIdentifiers.BackColor = enabled
-                ? Color.White
-                : Color.FromArgb(242, 244, 247);
-            if (enabled)
-            {
-                txtMarkerIdentifiers.Focus();
-            }
-        }
-
-        private static void SetCueBanner(TextBox textBox, string cueText)
-        {
-            if (textBox == null || !textBox.IsHandleCreated)
-            {
-                return;
-            }
-
-            SendMessage(textBox.Handle, 0x1501, new IntPtr(1), cueText ?? string.Empty);
-        }
-
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
 
         private void RenderRows()
         {
@@ -712,23 +1122,143 @@ namespace DocuLint
             }
         }
 
-        private void MergeSavedRequirements(Dictionary<string, RequirementItem> saved)
+        private void MergeSavedRequirements(IEnumerable<RequirementItem> savedItems)
         {
-            saved = saved ?? new Dictionary<string, RequirementItem>(StringComparer.OrdinalIgnoreCase);
-            foreach (RequirementItem item in requirements)
+            List<RequirementItem> saved = (savedItems ?? Enumerable.Empty<RequirementItem>())
+                .Where(item => item != null && !string.IsNullOrWhiteSpace(item.Id))
+                .ToList();
+            HashSet<RequirementItem> matchedSaved = new HashSet<RequirementItem>();
+            HashSet<RequirementItem> matchedCurrent = new HashSet<RequirementItem>();
+
+            // First retain data for markers that did not change at all.
+            Dictionary<string, Queue<RequirementItem>> savedById = saved
+                .GroupBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => new Queue<RequirementItem>(group),
+                    StringComparer.OrdinalIgnoreCase);
+            foreach (RequirementItem current in requirements.Where(item => item != null && !string.IsNullOrWhiteSpace(item.Id)))
             {
-                if (item == null || string.IsNullOrWhiteSpace(item.Id))
+                Queue<RequirementItem> candidates;
+                if (!savedById.TryGetValue(current.Id, out candidates) || candidates.Count == 0)
                 {
                     continue;
                 }
 
-                RequirementItem savedItem;
-                if (saved.TryGetValue(item.Id, out savedItem))
+                RequirementItem previous = candidates.Dequeue();
+                CopySavedRequirementData(previous, current);
+                matchedSaved.Add(previous);
+                matchedCurrent.Add(current);
+            }
+
+            // When inserted markers shift sequence numbers, preserve the old data by
+            // matching the remaining entries within the same marker prefix.
+            List<RequirementItem> remainingSaved = saved.Where(item => !matchedSaved.Contains(item)).ToList();
+            List<RequirementItem> remainingCurrent = requirements
+                .Where(item => item != null && !matchedCurrent.Contains(item) && !string.IsNullOrWhiteSpace(item.Id))
+                .ToList();
+            foreach (IGrouping<string, RequirementItem> savedGroup in remainingSaved
+                .GroupBy(item => GetMarkerPrefix(item.Id), StringComparer.OrdinalIgnoreCase))
+            {
+                string prefix = savedGroup.Key;
+                List<RequirementItem> currentGroup = remainingCurrent
+                    .Where(item => string.Equals(GetMarkerPrefix(item.Id), prefix, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (string.IsNullOrWhiteSpace(prefix) || currentGroup.Count == 0)
                 {
-                    item.Name = savedItem.Name;
-                    item.SectionNumber = savedItem.SectionNumber;
+                    continue;
+                }
+
+                foreach (RequirementItem previous in savedGroup)
+                {
+                    RequirementItem current = SelectClosestMarkerNumber(previous, currentGroup);
+                    if (current == null)
+                    {
+                        break;
+                    }
+
+                    CopySavedRequirementData(previous, current);
+                    currentGroup.Remove(current);
                 }
             }
+        }
+
+        private void UpdateExtractionActionLabel(Word.Document doc)
+        {
+            bool hasExtractedMarkers = requirements.Any(item =>
+                item != null && !string.IsNullOrWhiteSpace(item.Id));
+            if (!hasExtractedMarkers && doc != null)
+            {
+                Office.CustomXMLPart savedPart = FindSavedRequirementPart(doc);
+                hasExtractedMarkers = savedPart != null && ContainsSavedRequirement(savedPart);
+            }
+
+            btnRefresh.Text = hasExtractedMarkers ? "更新提取" : "加载标识";
+            toolTip.SetToolTip(
+                btnRefresh,
+                hasExtractedMarkers
+                    ? "按当前文档类型更新标识，并保留已提取的内容"
+                    : "按当前文档类型扫描并加载标识");
+        }
+
+        private static void CopySavedRequirementData(RequirementItem source, RequirementItem target)
+        {
+            if (source == null || target == null)
+            {
+                return;
+            }
+
+            target.Name = source.Name ?? string.Empty;
+            target.SectionNumber = source.SectionNumber ?? string.Empty;
+        }
+
+        private static RequirementItem SelectClosestMarkerNumber(
+            RequirementItem previous,
+            IEnumerable<RequirementItem> candidates)
+        {
+            string previousPrefix;
+            long previousNumber;
+            bool hasPreviousNumber = TryGetMarkerNumber(previous?.Id, out previousPrefix, out previousNumber);
+            return (candidates ?? Enumerable.Empty<RequirementItem>())
+                .Select((candidate, index) => new
+                {
+                    Candidate = candidate,
+                    Index = index,
+                    Distance = hasPreviousNumber && TryGetMarkerNumber(candidate?.Id, out _, out long candidateNumber)
+                        ? Math.Abs(candidateNumber - previousNumber)
+                        : long.MaxValue
+                })
+                .OrderBy(item => item.Distance)
+                .ThenBy(item => item.Index)
+                .Select(item => item.Candidate)
+                .FirstOrDefault();
+        }
+
+        private static string GetMarkerPrefix(string markerId)
+        {
+            string prefix;
+            long number;
+            return TryGetMarkerNumber(markerId, out prefix, out number) ? prefix : string.Empty;
+        }
+
+        private static bool TryGetMarkerNumber(string markerId, out string prefix, out long number)
+        {
+            prefix = string.Empty;
+            number = 0;
+            string value = (markerId ?? string.Empty).Trim().TrimStart('/');
+            int start = value.Length;
+            while (start > 0 && char.IsDigit(value[start - 1]))
+            {
+                start--;
+            }
+
+            if (start == value.Length || start == 0 || !long.TryParse(value.Substring(start), out number))
+            {
+                return false;
+            }
+
+            prefix = value.Substring(0, start).TrimEnd('-').Trim();
+            return prefix.Length > 0;
         }
 
         private string BuildSavedRequirementsXml()
@@ -780,42 +1310,6 @@ namespace DocuLint
             return result;
         }
 
-        private static Dictionary<string, RequirementItem> LoadSavedRequirements(Word.Document doc)
-        {
-            Dictionary<string, RequirementItem> result = new Dictionary<string, RequirementItem>(StringComparer.OrdinalIgnoreCase);
-            Office.CustomXMLPart part = FindSavedRequirementPart(doc);
-            if (part == null)
-            {
-                return result;
-            }
-
-            try
-            {
-                XDocument document = XDocument.Parse(part.XML);
-                XName itemName = XName.Get("requirement", SavedRequirementsNamespace);
-                foreach (XElement element in document.Descendants(itemName))
-                {
-                    string id = (string)element.Attribute("id") ?? string.Empty;
-                    if (string.IsNullOrWhiteSpace(id))
-                    {
-                        continue;
-                    }
-
-                    result[id] = new RequirementItem
-                    {
-                        Id = id,
-                        Name = (string)element.Attribute("name") ?? string.Empty,
-                        SectionNumber = (string)element.Attribute("section") ?? string.Empty
-                    };
-                }
-            }
-            catch
-            {
-            }
-
-            return result;
-        }
-
         internal static List<RequirementItem> LoadSavedRequirementItems(Word.Document doc)
         {
             List<RequirementItem> result = new List<RequirementItem>();
@@ -851,6 +1345,107 @@ namespace DocuLint
             }
 
             return result;
+        }
+
+        private void RestoreRequirementPositions(Word.Document doc)
+        {
+            if (doc == null || requirements.Count == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                Dictionary<string, Queue<int>> positionsById =
+                    new Dictionary<string, Queue<int>>(StringComparer.OrdinalIgnoreCase);
+                DocumentMarkerCollectionResult markerResult = DocumentMarkerService.CollectMarkers(doc);
+                foreach (NavigationPaneEntry entry in markerResult?.Entries ?? new List<NavigationPaneEntry>())
+                {
+                    if (entry == null || string.IsNullOrWhiteSpace(entry.Text) || entry.Start < 0)
+                    {
+                        continue;
+                    }
+
+                    string key = NormalizeRequirementIdKey(entry.Text);
+                    if (!positionsById.TryGetValue(key, out Queue<int> positions))
+                    {
+                        positions = new Queue<int>();
+                        positionsById[key] = positions;
+                    }
+
+                    positions.Enqueue(entry.Start);
+                }
+
+                foreach (RequirementItem item in requirements)
+                {
+                    if (item == null || string.IsNullOrWhiteSpace(item.Id))
+                    {
+                        continue;
+                    }
+
+                    string key = NormalizeRequirementIdKey(item.Id);
+                    if (positionsById.TryGetValue(key, out Queue<int> positions) && positions.Count > 0)
+                    {
+                        item.Start = positions.Dequeue();
+                        item.BookmarkOrRange = item.Start;
+                        continue;
+                    }
+
+                    int fallbackStart = FindRequirementPosition(doc, item.Id);
+                    if (fallbackStart >= 0)
+                    {
+                        item.Start = fallbackStart;
+                        item.BookmarkOrRange = fallbackStart;
+                    }
+                }
+            }
+            catch
+            {
+                // 定位恢复失败不应阻止需求提取窗格显示；单项查找仍可在后续补救。
+            }
+        }
+
+        private static int FindRequirementPosition(Word.Document doc, string requirementId)
+        {
+            if (doc?.Content == null || string.IsNullOrWhiteSpace(requirementId))
+            {
+                return -1;
+            }
+
+            foreach (string candidate in new[]
+            {
+                requirementId.Trim(),
+                requirementId.Trim().TrimStart('/')
+            }.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    Word.Range searchRange = doc.Content.Duplicate;
+                    Word.Find find = searchRange.Find;
+                    find.ClearFormatting();
+                    find.Replacement.ClearFormatting();
+                    find.Text = candidate;
+                    find.Forward = true;
+                    find.Wrap = Word.WdFindWrap.wdFindStop;
+                    find.Format = false;
+                    find.MatchCase = false;
+                    find.MatchWholeWord = false;
+                    if (find.Execute())
+                    {
+                        return searchRange.Start;
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return -1;
+        }
+
+        private static string NormalizeRequirementIdKey(string value)
+        {
+            return (value ?? string.Empty).Trim().TrimStart('/');
         }
 
         private static void DeleteSavedRequirementParts(Word.Document doc)
@@ -954,7 +1549,9 @@ namespace DocuLint
             {
                 XDocument document = XDocument.Parse(part?.XML ?? string.Empty);
                 XName itemName = XName.Get("requirement", SavedRequirementsNamespace);
-                return document.Descendants(itemName).Any();
+                return document.Descendants(itemName).Any(element =>
+                    !string.IsNullOrWhiteSpace((string)element.Attribute("id")) ||
+                    !string.IsNullOrWhiteSpace((string)element.Attribute("name")));
             }
             catch
             {
@@ -1075,13 +1672,22 @@ namespace DocuLint
             if (suppressGridValueChanged ||
                 e.RowIndex < 0 ||
                 e.RowIndex >= requirements.Count ||
-                (e.ColumnIndex != 1 && e.ColumnIndex != 2))
+                (e.ColumnIndex != 0 && e.ColumnIndex != 1 && e.ColumnIndex != 2))
             {
                 return;
             }
 
             RequirementItem item = requirements[e.RowIndex];
-            if (e.ColumnIndex == 1)
+            if (e.ColumnIndex == 0)
+            {
+                if (!customMode)
+                {
+                    return;
+                }
+
+                item.Id = Convert.ToString(grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value) ?? string.Empty;
+            }
+            else if (e.ColumnIndex == 1)
             {
                 item.Name = Convert.ToString(grid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value) ?? string.Empty;
             }
@@ -1146,7 +1752,27 @@ namespace DocuLint
             {
             }
 
-            RequirementActivated?.Invoke(NormalizeDocumentPosition(currentDocument, item.Start));
+            int position = item.Start;
+            try
+            {
+                int contentStart = currentDocument?.Content?.Start ?? 0;
+                int contentEnd = currentDocument?.Content?.End ?? 0;
+                if (position <= contentStart || position >= contentEnd)
+                {
+                    int recoveredPosition = FindRequirementPosition(currentDocument, item.Id);
+                    if (recoveredPosition >= 0)
+                    {
+                        position = recoveredPosition;
+                        item.Start = recoveredPosition;
+                        item.BookmarkOrRange = recoveredPosition;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            RequirementActivated?.Invoke(NormalizeDocumentPosition(currentDocument, position));
         }
 
         private static int NormalizeDocumentPosition(Word.Document doc, int position)
@@ -1246,14 +1872,19 @@ namespace DocuLint
             {
                 SaveToCurrentDocument();
             }
+            else
+            {
+                // 放弃窗格中的未保存加载或编辑结果，恢复到文档中已保存的内容。
+                LoadSavedRequirementsFromCurrentDocument();
+            }
         }
 
         private void ApplyExtractionButtonState()
         {
-            btnExtractionEnabled.Text = extractionEnabled ? "结束提取" : "开始提取";
+            btnExtractionEnabled.Text = extractionEnabled ? "结束批量提取" : "开始批量提取";
             btnExtractionEnabled.BackColor = extractionEnabled ? Color.FromArgb(35, 138, 79) : Color.FromArgb(235, 243, 255);
             btnExtractionEnabled.ForeColor = extractionEnabled ? Color.White : Color.FromArgb(38, 90, 166);
-            btnBatchExtraction.Text = batchExtractionEnabled ? "批量提取：开" : "批量提取";
+            btnBatchExtraction.Text = batchExtractionEnabled ? "结束批量提取" : "开始批量提取";
             btnBatchExtraction.BackColor = batchExtractionEnabled ? Color.FromArgb(35, 138, 79) : Color.FromArgb(235, 243, 255);
             btnBatchExtraction.ForeColor = batchExtractionEnabled ? Color.White : Color.FromArgb(38, 90, 166);
         }

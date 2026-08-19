@@ -16,6 +16,9 @@ namespace DocuLint
         private NavigationPaneControl navigationPaneControl;
         // Word右侧自定义任务面板
         private CustomTaskPane navigationTaskPane;
+        // 与插件绑定的常用语任务窗格，不随文档切换清空。
+        private CommonPhrasesPaneControl commonPhrasesPaneControl;
+        private CustomTaskPane commonPhrasesTaskPane;
         // 需求追踪控制台界面控件
         private RequirementTrackingConsoleControl requirementTrackingConsoleControl;
         // 需求追踪独立任务窗格
@@ -39,6 +42,7 @@ namespace DocuLint
         private Timer ribbonWarmupTimer;
         // 延迟刷新 Ribbon，避免拖选文字时同步读取 Selection 打断 Word 选区。
         private Timer styleRibbonRefreshTimer;
+        private Timer navigationPaneStateRefreshTimer;
         private string lastStyleRefreshDocumentKey;
         private int lastStyleRefreshStart = -1;
         private int lastStyleRefreshEnd = -1;
@@ -58,6 +62,9 @@ namespace DocuLint
         private bool previousShowSelectionFloaties;
         private bool previousShowMenuFloaties;
 
+        // 追踪设置仅在本次 Word 会话中生效，不写入插件配置。
+        internal bool PreserveForwardMappingsWhenReverseTracing { get; set; } = true;
+
         // 插件启动时执行
         private void ThisAddIn_Startup(object sender, System.EventArgs e)
         {
@@ -69,6 +76,8 @@ namespace DocuLint
             ribbonWarmupTimer.Start();
             styleRibbonRefreshTimer = new Timer { Interval = 180 };
             styleRibbonRefreshTimer.Tick += StyleRibbonRefreshTimer_Tick;
+            navigationPaneStateRefreshTimer = new Timer { Interval = 120 };
+            navigationPaneStateRefreshTimer.Tick += NavigationPaneStateRefreshTimer_Tick;
             requirementExtractionAutoAddTimer = new Timer { Interval = 80 };
             requirementExtractionAutoAddTimer.Tick += RequirementExtractionAutoAddTimer_Tick;
             requirementQuickAddPopupTimer = new Timer { Interval = 20 };
@@ -113,6 +122,21 @@ namespace DocuLint
                 }
 
                 styleRibbonRefreshTimer = null;
+            }
+
+            if (navigationPaneStateRefreshTimer != null)
+            {
+                try
+                {
+                    navigationPaneStateRefreshTimer.Stop();
+                    navigationPaneStateRefreshTimer.Tick -= NavigationPaneStateRefreshTimer_Tick;
+                    navigationPaneStateRefreshTimer.Dispose();
+                }
+                catch
+                {
+                }
+
+                navigationPaneStateRefreshTimer = null;
             }
 
             if (ribbonWarmupTimer != null)
@@ -161,6 +185,7 @@ namespace DocuLint
             }
 
             RemoveTaskPane(ref navigationTaskPane, ref navigationPaneControl);
+            RemoveTaskPane(ref commonPhrasesTaskPane, ref commonPhrasesPaneControl);
             RemoveAllRequirementTrackingPanes();
             RemoveAllRequirementExtractionPanes();
             RemoveTaskPane(ref documentCheckResultTaskPane, ref documentCheckResultPaneControl);
@@ -274,6 +299,40 @@ namespace DocuLint
 
             requirementExtractionTaskPane.Visible = true;
             SuppressWordSelectionFloaties();
+        }
+
+        internal void ShowCommonPhrasesPane()
+        {
+            EnsureCommonPhrasesPane();
+            if (commonPhrasesPaneControl == null || commonPhrasesTaskPane == null)
+            {
+                return;
+            }
+
+            commonPhrasesPaneControl.ReloadPhrases();
+            commonPhrasesTaskPane.Visible = true;
+        }
+
+        internal void RefreshCommonPhrasesPane()
+        {
+            try
+            {
+                commonPhrasesPaneControl?.ReloadPhrases();
+            }
+            catch
+            {
+            }
+        }
+
+        internal void OpenRequirementExtractionSettings()
+        {
+            EnsureRequirementExtractionPane();
+            if (requirementExtractionPaneControl == null)
+            {
+                return;
+            }
+
+            requirementExtractionPaneControl.OpenExtractionSettings();
         }
 
         internal void AddSelectedTextToRequirementExtraction()
@@ -528,6 +587,8 @@ namespace DocuLint
                     context.Control?.ConfirmSaveBeforeClosing();
                 }
 
+                context.Control?.ResetOneTimeExtractionSettings();
+
                 StopRequirementQuickAddPopup();
                 HideRequirementQuickAddPopup();
                 RestoreWordSelectionFloaties();
@@ -774,6 +835,7 @@ namespace DocuLint
         private void Application_WindowSelectionChange(Word.Selection selection)
         {
             Ribbon1.HandleStyleBrushSelectionChange(selection);
+            RefreshNavigationPaneState();
             ScheduleStyleRibbonRefresh(selection);
             ScheduleRequirementExtractionAutoAdd(selection);
             ScheduleRequirementQuickAddPopup(selection);
@@ -789,6 +851,8 @@ namespace DocuLint
             StopRequirementExtractionAutoAdd();
             StopRequirementQuickAddPopup();
             HideRequirementQuickAddPopup();
+            RefreshNavigationPaneState();
+            ScheduleNavigationPaneStateRefresh();
             if (IsRequirementExtractionPaneVisible())
             {
                 SuppressWordSelectionFloaties();
@@ -821,6 +885,56 @@ namespace DocuLint
             try
             {
                 Ribbon1.RefreshAllStyleIndicators();
+            }
+            catch
+            {
+            }
+        }
+
+        private void EnsureCommonPhrasesPane()
+        {
+            if (commonPhrasesPaneControl == null)
+            {
+                commonPhrasesPaneControl = new CommonPhrasesPaneControl(() => Application);
+            }
+
+            if (commonPhrasesTaskPane == null)
+            {
+                commonPhrasesTaskPane = CustomTaskPanes.Add(commonPhrasesPaneControl, "常用语");
+                commonPhrasesTaskPane.DockPosition = Office.MsoCTPDockPosition.msoCTPDockPositionRight;
+                commonPhrasesTaskPane.Width = 360;
+            }
+        }
+
+        internal void ScheduleNavigationPaneStateRefresh()
+        {
+            try
+            {
+                navigationPaneStateRefreshTimer?.Stop();
+                navigationPaneStateRefreshTimer?.Start();
+            }
+            catch
+            {
+            }
+        }
+
+        private void NavigationPaneStateRefreshTimer_Tick(object sender, EventArgs e)
+        {
+            try
+            {
+                navigationPaneStateRefreshTimer?.Stop();
+                RefreshNavigationPaneState();
+            }
+            catch
+            {
+            }
+        }
+
+        private static void RefreshNavigationPaneState()
+        {
+            try
+            {
+                Ribbon1.RefreshNavigationPaneIndicators();
             }
             catch
             {

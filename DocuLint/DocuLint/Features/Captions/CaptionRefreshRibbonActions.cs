@@ -11,7 +11,7 @@ namespace DocuLint
         {
             try
             {
-                ResetOperationCancellation();
+                ResetOperationCancellation("更新图片题注");
                 Word.Application app = Globals.ThisAddIn.Application;
                 Word.Document doc = app?.ActiveDocument;
                 if (doc == null)
@@ -70,7 +70,7 @@ namespace DocuLint
         {
             try
             {
-                ResetOperationCancellation();
+                ResetOperationCancellation("更新表格题注");
                 Word.Application app = Globals.ThisAddIn.Application;
                 Word.Document doc = app?.ActiveDocument;
                 if (doc == null)

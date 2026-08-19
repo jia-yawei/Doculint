@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using Microsoft.Office.Tools.Ribbon;
 using Word = Microsoft.Office.Interop.Word;
@@ -75,6 +76,162 @@ namespace DocuLint
             {
                 MessageBox.Show($"插入总页码失败: {ex.Message}", "文档不加班 快速工具");
             }
+        }
+
+        private void btnCommonPhrases_Click(object sender, RibbonControlEventArgs e)
+        {
+            Globals.ThisAddIn?.ShowCommonPhrasesPane();
+        }
+
+        private void btnInsertSequenceNumber_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                ExecuteDocumentCommand("插入域编号", InsertSequenceNumberField);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"插入域编号失败：{ex.Message}", "文档不加班 快速工具");
+            }
+        }
+
+        private static void InsertSequenceNumberField()
+        {
+            Word.Application app = Globals.ThisAddIn.Application;
+            Word.Document doc = app?.ActiveDocument;
+            Word.Selection selection = app?.Selection;
+            string selectedNumber = selection?.Range?.Text?.Trim() ?? string.Empty;
+            if (doc == null || selection?.Range == null)
+            {
+                throw new InvalidOperationException("当前没有可替换的选区。");
+            }
+
+            if (selectedNumber.Length == 0 || selectedNumber.Any(character => character < '0' || character > '9'))
+            {
+                throw new InvalidOperationException("请先选中要生成域编号的数字，例如 001。");
+            }
+
+            using (SequenceFieldForm form = new SequenceFieldForm(selectedNumber))
+            {
+                if (form.ShowDialog() != DialogResult.OK)
+                {
+                    return;
+                }
+
+                string identifier = NormalizeSequenceIdentifier(form.SequenceIdentifier);
+                if (!IsValidSequenceIdentifier(identifier))
+                {
+                    throw new InvalidOperationException("SEQ 域名称不能为空，且不能包含反斜杠、双引号或换行。");
+                }
+
+                if (!selectedNumber.All(character => character >= '0' && character <= '9'))
+                {
+                    throw new InvalidOperationException("选中的编号不是有效数字。");
+                }
+
+                int width = selectedNumber.Length;
+                string format = new string('0', Math.Max(1, width));
+                // 直接写入标准 SEQ 域代码，确保 Word 显示为：
+                // SEQ STC_TC \\# "000"。
+                // 首次出现的域名称始终从 1 开始；选中的数字只用于确定显示位数。
+                string fieldCode = $" SEQ {identifier} \\# \"{format}\" ";
+
+                Word.Range replacementRange = selection.Range.Duplicate;
+                Word.Field field = replacementRange.Fields.Add(
+                    replacementRange,
+                    Word.WdFieldType.wdFieldEmpty,
+                    fieldCode,
+                    false);
+                if (field == null)
+                {
+                    throw new InvalidOperationException("SEQ 域插入失败。");
+                }
+
+                field.Update();
+                UpdateSequenceFields(doc, identifier);
+
+                Word.Range resultRange = field?.Result?.Duplicate ?? replacementRange;
+                resultRange.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
+                resultRange.Select();
+            }
+        }
+
+        private static string NormalizeSequenceIdentifier(string value)
+        {
+            string identifier = (value ?? string.Empty).Trim();
+            if (identifier.StartsWith("SEQ ", StringComparison.OrdinalIgnoreCase))
+            {
+                identifier = identifier.Substring(4).Trim();
+            }
+
+            return identifier;
+        }
+
+        private static bool IsValidSequenceIdentifier(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            return value.IndexOf('\\') < 0 &&
+                   value.IndexOf('"') < 0 &&
+                   value.All(character => !char.IsControl(character));
+        }
+
+        private static void UpdateSequenceFields(Word.Document doc, string identifier)
+        {
+            foreach (Word.Range storyRange in EnumerateStoryRanges(doc))
+            {
+                try
+                {
+                    foreach (Word.Field field in storyRange.Fields)
+                    {
+                        string code = field?.Code?.Text ?? string.Empty;
+                        if (Regex.IsMatch(
+                            code,
+                            $@"^\s*SEQ\s+{Regex.Escape(identifier)}(?:\s|$)",
+                            RegexOptions.IgnoreCase))
+                        {
+                            field.Update();
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private static bool HasSequenceField(Word.Document doc, string identifier)
+        {
+            if (doc == null || string.IsNullOrWhiteSpace(identifier))
+            {
+                return false;
+            }
+
+            foreach (Word.Range storyRange in EnumerateStoryRanges(doc))
+            {
+                try
+                {
+                    foreach (Word.Field field in storyRange.Fields)
+                    {
+                        string code = field?.Code?.Text ?? string.Empty;
+                        if (Regex.IsMatch(
+                            code,
+                            $@"^\s*SEQ\s+{Regex.Escape(identifier)}(?:\s|$)",
+                            RegexOptions.IgnoreCase))
+                        {
+                            return true;
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return false;
         }
 
         private void button7_Click(object sender, RibbonControlEventArgs e)
@@ -173,6 +330,52 @@ namespace DocuLint
             {
                 MessageBox.Show($"格式清除失败: {ex.Message}", "文档不加班 快速工具");
             }
+        }
+
+        private void btnCleanFieldCodes_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                int unlinkedCount = ExecuteDocumentCommand("清理域代码", RemoveSelectedFieldCodes);
+                MessageBox.Show(
+                    unlinkedCount > 0
+                        ? $"已清理 {unlinkedCount} 个域代码，保留当前显示结果。"
+                        : "当前选区中没有域代码。",
+                    "文档不加班 快速工具");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"清理域代码失败：{ex.Message}", "文档不加班 快速工具");
+            }
+        }
+
+        private static int RemoveSelectedFieldCodes()
+        {
+            Word.Application app = Globals.ThisAddIn.Application;
+            Word.Selection selection = app?.Selection;
+            Word.Range range = selection?.Range;
+            if (range == null || range.Start == range.End)
+            {
+                throw new InvalidOperationException("请先选中包含域代码的文本。");
+            }
+
+            Word.Fields fields = range.Fields;
+            int count = fields?.Count ?? 0;
+            int unlinkedCount = 0;
+            for (int index = count; index >= 1; index--)
+            {
+                try
+                {
+                    Word.Field field = fields[index];
+                    field?.Unlink();
+                    unlinkedCount++;
+                }
+                catch
+                {
+                }
+            }
+
+            return unlinkedCount;
         }
 
         private static void ApplyQuickFont(string fontName, float fontSize, string displayName)
@@ -284,7 +487,7 @@ namespace DocuLint
                 throw new ArgumentNullException(nameof(action));
             }
 
-            ResetOperationCancellation();
+            ResetOperationCancellation(actionName);
             Word.Application app = Globals.ThisAddIn.Application;
             using (new DocumentUndoScope(app, actionName))
             {
@@ -299,7 +502,7 @@ namespace DocuLint
                 throw new ArgumentNullException(nameof(action));
             }
 
-            ResetOperationCancellation();
+            ResetOperationCancellation(actionName);
             Word.Application app = Globals.ThisAddIn.Application;
             using (new DocumentUndoScope(app, actionName))
             {

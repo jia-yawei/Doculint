@@ -35,6 +35,245 @@ namespace DocuLint
             ExecuteRepairChapterNumbers();
         }
 
+        private void btnRepairHeadingStyles_Click(object sender, RibbonControlEventArgs e)
+        {
+            Word.Application app = Globals.ThisAddIn?.Application;
+            Word.Document doc = app?.ActiveDocument;
+            if (doc == null)
+            {
+                MessageBox.Show("当前没有活动文档。", "标题样式修复");
+                return;
+            }
+
+            try
+            {
+                string styleLibraryDocumentKey = GetCommonStylesDocumentKey(doc);
+                List<string> cachedStyleNames = GetCachedHeadingStyleNames(styleLibraryDocumentKey);
+                if (cachedStyleNames.Count == 0)
+                {
+                    MessageBox.Show(
+                        "当前文档尚未加载样式库，请先打开“添加常用样式”面板并点击“加载样式库”。",
+                        "标题样式修复",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return;
+                }
+                using (HeadingStyleRepairForm form = new HeadingStyleRepairForm(
+                    Enumerable.Range(1, 9),
+                    cachedStyleNames))
+                {
+                    if (form.ShowDialog() != DialogResult.OK)
+                    {
+                        return;
+                    }
+
+                    IReadOnlyDictionary<int, string> selectedStyles = form.SelectedStyles;
+                    List<HeadingStyleEntry> entries;
+                    int repairedCount = 0;
+                    int scanStart = Math.Max(doc.Content.Start, GetScanStartAfterToc(doc));
+                    using (OutlineProgressForm progressForm =
+                        new OutlineProgressForm("标题样式修复", "正在定位标题"))
+                    {
+                        progressForm.Show();
+                        progressForm.ReportProgress(
+                            0,
+                            1,
+                            scanStart > doc.Content.Start
+                                ? "正在目录之后按所选大纲级别定位标题..."
+                                : "正在按所选大纲级别定位标题...");
+                        entries = CollectHeadingStyleEntries(
+                            doc,
+                            new HashSet<int>(selectedStyles.Keys),
+                            scanStart,
+                            (current, total, message) => progressForm.ReportProgress(current, total, message));
+
+                        if (entries.Count > 0)
+                        {
+                            progressForm.ReportProgress(0, entries.Count, "正在应用目标样式...");
+                            using (new WordPerformanceScope(app))
+                            {
+                                repairedCount = ApplyHeadingStyles(
+                                    entries,
+                                    selectedStyles,
+                                    (current, total, message) => progressForm.ReportProgress(current, total, message));
+                            }
+
+                            app?.ScreenRefresh();
+                        }
+                    }
+
+                    if (entries.Count == 0)
+                    {
+                        MessageBox.Show("当前文档中未找到所选大纲级别的标题。", "标题样式修复");
+                        return;
+                    }
+
+                    TryUpdateStatusBar(app, "标题样式修复完成");
+                    MessageBox.Show(
+                        repairedCount > 0
+                            ? $"标题样式修复完成。已找到 {entries.Count} 个所选级别标题，共修复 {repairedCount} 个标题。"
+                            : $"已检查 {entries.Count} 个所选级别标题，均已使用指定样式，无需修复。",
+                        "标题样式修复",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                TryUpdateStatusBar(app, "标题样式修复已停止");
+                MessageBox.Show("标题样式修复已停止。", "标题样式修复", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("标题样式修复失败：\r\n" + ex.Message, "标题样式修复", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private static List<string> GetCachedHeadingStyleNames(string documentKey)
+        {
+            if (string.IsNullOrWhiteSpace(documentKey) ||
+                !headingStyleLibraryCache.TryGetValue(documentKey, out List<string> names))
+            {
+                return new List<string>();
+            }
+
+            return names.ToList();
+        }
+
+        private static List<string> LoadHeadingStyleNames(
+            Word.Document doc,
+            string documentKey,
+            Action<int, int> progress)
+        {
+            List<string> names = GetDocumentParagraphStyleNames(doc, progress);
+            if (names.Count > 0 && !string.IsNullOrWhiteSpace(documentKey))
+            {
+                headingStyleLibraryCache[documentKey] = names.ToList();
+            }
+
+            return names;
+        }
+
+        private List<HeadingStyleEntry> CollectHeadingStyleEntries(
+            Word.Document doc,
+            HashSet<int> selectedLevels,
+            int scanStart,
+            Action<int, int, string> progress)
+        {
+            List<HeadingStyleEntry> entries = new List<HeadingStyleEntry>();
+            if (doc?.Content == null || selectedLevels == null || selectedLevels.Count == 0)
+            {
+                return entries;
+            }
+
+            ResetOperationCancellation("读取标题样式");
+            List<Word.Range> headingRanges = CollectOutlineRangesByFind(
+                doc,
+                selectedLevels,
+                Math.Max(doc.Content.Start, scanStart),
+                doc.Content.End,
+                progress);
+            int total = headingRanges.Count;
+            for (int index = 0; index < total; index++)
+            {
+                ThrowIfOperationCancelled();
+                try
+                {
+                    Word.Paragraph paragraph = GetHostParagraph(headingRanges[index]);
+                    int level = GetParagraphOutlineLevel(paragraph);
+                    if (!selectedLevels.Contains(level) || paragraph?.Range == null)
+                    {
+                        continue;
+                    }
+
+                    string styleName = ResolveStyleName(TryGetStyle(paragraph.Range), doc);
+                    if (string.IsNullOrWhiteSpace(styleName))
+                    {
+                        continue;
+                    }
+
+                    entries.Add(new HeadingStyleEntry(level, paragraph.Range.Duplicate, styleName));
+                }
+                catch
+                {
+                }
+
+                if (index == 0 || index == total - 1 || index % 10 == 0)
+                {
+                    progress?.Invoke(index + 1, Math.Max(1, total), "正在读取标题当前样式...");
+                }
+            }
+
+            return entries;
+        }
+
+        private static int ApplyHeadingStyles(
+            IEnumerable<HeadingStyleEntry> entries,
+            IReadOnlyDictionary<int, string> selectedStyles,
+            Action<int, int, string> progress = null)
+        {
+            if (entries == null || selectedStyles == null || selectedStyles.Count == 0)
+            {
+                return 0;
+            }
+
+            ResetOperationCancellation("标题样式修复");
+            int repairedCount = 0;
+            List<HeadingStyleEntry> entryList = entries.ToList();
+            int total = entryList.Count;
+            for (int index = 0; index < total; index++)
+            {
+                ThrowIfOperationCancelled();
+                HeadingStyleEntry entry = entryList[index];
+                if (!selectedStyles.TryGetValue(entry.Level, out string targetStyle) ||
+                    string.IsNullOrWhiteSpace(targetStyle) ||
+                    string.Equals(entry.StyleName, targetStyle, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (index == 0 || index == total - 1 || index % 10 == 0)
+                    {
+                        progress?.Invoke(index + 1, Math.Max(1, total), "正在应用目标样式...");
+                    }
+                    continue;
+                }
+
+                if (TrySetStyle(entry.Range, targetStyle))
+                {
+                    repairedCount++;
+                }
+
+                if (index == 0 || index == total - 1 || index % 10 == 0)
+                {
+                    progress?.Invoke(index + 1, Math.Max(1, total), "正在应用目标样式...");
+                }
+            }
+
+            try
+            {
+                Globals.ThisAddIn?.Application?.ScreenRefresh();
+            }
+            catch
+            {
+            }
+
+            return repairedCount;
+        }
+
+        private sealed class HeadingStyleEntry
+        {
+            internal HeadingStyleEntry(int level, Word.Range range, string styleName)
+            {
+                Level = level;
+                Range = range;
+                StyleName = styleName;
+            }
+
+            internal int Level { get; }
+
+            internal Word.Range Range { get; }
+
+            internal string StyleName { get; }
+        }
+
         private void ExecuteRepairChapterNumbers()
         {
             Word.Application app = Globals.ThisAddIn?.Application;
@@ -73,7 +312,7 @@ namespace DocuLint
 
             try
             {
-                ResetOperationCancellation();
+                ResetOperationCancellation("章节号修复");
                 int scanStart = Math.Max(doc.Content.Start, GetScanStartAfterToc(doc));
                 int initialCheckedHeadingCount;
                 List<string> styleConflicts;
@@ -378,7 +617,7 @@ namespace DocuLint
 
             try
             {
-                ResetOperationCancellation();
+                ResetOperationCancellation("更新所选章节号");
                 using (OutlineProgressForm progressForm = new OutlineProgressForm())
                 {
                     progressForm.Show();
@@ -410,7 +649,7 @@ namespace DocuLint
         {
             try
             {
-                ResetOperationCancellation();
+                ResetOperationCancellation("清除标题手工编号");
                 Word.Application app = Globals.ThisAddIn.Application;
                 Word.Document doc = app?.ActiveDocument;
                 if (doc == null)

@@ -20,7 +20,9 @@ namespace DocuLint
         {
             TablesAndFiguresFormattingSettings dialogDefaults = TablesAndFiguresFormattingSettings.CreateDefault();
             using (TablesAndFiguresFormattingSettingsForm settingsForm =
-                new TablesAndFiguresFormattingSettingsForm(dialogDefaults))
+                new TablesAndFiguresFormattingSettingsForm(
+                    dialogDefaults,
+                    CommonPhraseLibrary.ConfiguredPath))
             {
                 if (settingsForm.ShowDialog() != DialogResult.OK)
                 {
@@ -29,6 +31,8 @@ namespace DocuLint
 
                 currentTablesAndFiguresFormattingSettings = settingsForm.Settings?.Clone()
                     ?? TablesAndFiguresFormattingSettings.CreateDefault();
+                CommonPhraseLibrary.SaveConfiguredPath(settingsForm.CommonPhraseLibraryPath);
+                Globals.ThisAddIn?.RefreshCommonPhrasesPane();
             }
         }
 

@@ -25,7 +25,7 @@ namespace DocuLint
             Word.Application app = Globals.ThisAddIn.Application;
             try
             {
-                ResetOperationCancellation();
+                ResetOperationCancellation("文档检查");
                 Word.Document doc = app?.ActiveDocument;
                 if (doc == null)
                 {
@@ -44,14 +44,15 @@ namespace DocuLint
                     return;
                 }
 
-                int totalSteps = CountDocumentCheckSteps(doc, checkBlankLines, checkCaptions, checkLists, checkStyles, checkBrokenReferences);
+                int scanStart = GetDocumentCheckScanStart(doc);
+                int totalSteps = CountDocumentCheckSteps(doc, scanStart, checkBlankLines, checkCaptions, checkLists, checkStyles, checkBrokenReferences);
                 DocumentCheckProgress progress = new DocumentCheckProgress(app, totalSteps);
-                progress.Report("正在检查文档");
+                progress.Report("正在检查文档（已忽略首页）");
 
                 List<DocumentCheckIssue> issues;
                 using (new WordPerformanceScope(app))
                 {
-                    issues = CollectDocumentCheckIssues(doc, checkBlankLines, checkCaptions, checkLists, checkStyles, checkBrokenReferences, progress);
+                    issues = CollectDocumentCheckIssues(doc, scanStart, checkBlankLines, checkCaptions, checkLists, checkStyles, checkBrokenReferences, progress);
                 }
 
                 progress.Complete(issues.Count);
@@ -74,7 +75,7 @@ namespace DocuLint
             Word.Application app = Globals.ThisAddIn.Application;
             try
             {
-                ResetOperationCancellation();
+                ResetOperationCancellation("软件文档检查");
                 Word.Document doc = app?.ActiveDocument;
                 if (doc == null)
                 {
@@ -108,6 +109,7 @@ namespace DocuLint
 
         private static List<DocumentCheckIssue> CollectDocumentCheckIssues(
             Word.Document doc,
+            int scanStart,
             bool checkBlankLines,
             bool checkCaptions,
             bool checkLists,
@@ -126,7 +128,7 @@ namespace DocuLint
             if (checkBlankLines)
             {
                 ThrowIfOperationCancelled();
-                issues.AddRange(CollectNonBodyBlankLineIssuesByOutlineFind(doc, progress));
+                issues.AddRange(CollectNonBodyBlankLineIssuesByOutlineFind(doc, scanStart, progress));
             }
 
             if (!checkCaptions && !checkLists && !checkStyles && !checkBrokenReferences)
@@ -137,25 +139,25 @@ namespace DocuLint
             if (checkCaptions)
             {
                 ThrowIfOperationCancelled();
-                issues.AddRange(CollectCaptionContinuityIssues(doc, expectedNumbers, progress));
+                issues.AddRange(CollectCaptionContinuityIssues(doc, scanStart, expectedNumbers, progress));
             }
 
             if (checkLists)
             {
                 ThrowIfOperationCancelled();
-                issues.AddRange(CollectListContinuityIssuesByOutlineFind(doc, counters, progress));
+                issues.AddRange(CollectListContinuityIssuesByOutlineFind(doc, scanStart, counters, progress));
             }
 
             if (checkStyles)
             {
                 ThrowIfOperationCancelled();
-                issues.AddRange(CollectStyleConsistencyIssues(doc, progress));
+                issues.AddRange(CollectStyleConsistencyIssues(doc, scanStart, progress));
             }
 
             if (checkBrokenReferences)
             {
                 ThrowIfOperationCancelled();
-                issues.AddRange(CollectBrokenReferenceIssues(doc, progress));
+                issues.AddRange(CollectBrokenReferenceIssues(doc, scanStart, progress));
             }
 
             return issues;
@@ -165,17 +167,18 @@ namespace DocuLint
         {
             List<DocumentCheckIssue> issues = new List<DocumentCheckIssue>();
             SoftwareDocumentSpec spec = DetectSoftwareDocumentSpec(doc);
+            int scanStart = GetDocumentCheckScanStart(doc);
             ThrowIfOperationCancelled();
             if (spec == null)
             {
                 issues.Add(new DocumentCheckIssue(
-                    GetDocumentStart(doc),
-                    GetDocumentStart(doc),
+                    scanStart,
+                    scanStart,
                     "软件文档检查：未能从当前文档标题识别为已支持的软件文档类型。"));
                 return issues;
             }
 
-            List<SoftwareDocumentHeading> headings = CollectSoftwareDocumentHeadings(doc, maxOutlineLevel: 3);
+            List<SoftwareDocumentHeading> headings = CollectSoftwareDocumentHeadings(doc, maxOutlineLevel: 3, scanStart);
             foreach (string requiredTitle in spec.RequiredHeadings)
             {
                 ThrowIfOperationCancelled();
@@ -186,19 +189,20 @@ namespace DocuLint
                 }
 
                 issues.Add(new DocumentCheckIssue(
-                    GetDocumentStart(doc),
-                    GetDocumentStart(doc),
+                    scanStart,
+                    scanStart,
                     $"软件文档检查：{spec.Name} 缺少章节标题“{requiredTitle}”。"));
             }
 
             return issues;
         }
 
-        private static List<DocumentCheckIssue> CollectBrokenReferenceIssues(Word.Document doc, DocumentCheckProgress progress)
+        private static List<DocumentCheckIssue> CollectBrokenReferenceIssues(Word.Document doc, int scanStart, DocumentCheckProgress progress)
         {
             progress.Step("正在检查未更新域");
             ThrowIfOperationCancelled();
             return CollectBrokenReferenceEntries(doc)
+                .Where(entry => entry != null && entry.Start >= scanStart)
                 .Select(entry => new DocumentCheckIssue(entry.Start, entry.Start, entry.Text ?? "未更新域"))
                 .ToList();
         }
@@ -247,7 +251,7 @@ namespace DocuLint
             }
         }
 
-        private static List<SoftwareDocumentHeading> CollectSoftwareDocumentHeadings(Word.Document doc, int maxOutlineLevel)
+        private static List<SoftwareDocumentHeading> CollectSoftwareDocumentHeadings(Word.Document doc, int maxOutlineLevel, int scanStart)
         {
             List<SoftwareDocumentHeading> headings = new List<SoftwareDocumentHeading>();
             if (doc?.Content == null)
@@ -261,7 +265,7 @@ namespace DocuLint
             {
                 ThrowIfOperationCancelled();
                 Word.Range searchRange = doc.Content.Duplicate;
-                searchRange.SetRange(doc.Content.Start, doc.Content.End);
+                searchRange.SetRange(scanStart, doc.Content.End);
                 Word.Find find = searchRange.Find;
                 find.ClearFormatting();
                 find.Text = string.Empty;
@@ -379,13 +383,27 @@ namespace DocuLint
             }
         }
 
+        private static int GetDocumentCheckScanStart(Word.Document doc)
+        {
+            int documentStart = GetDocumentStart(doc);
+            try
+            {
+                return Math.Max(documentStart, GetFirstPageEnd(doc));
+            }
+            catch
+            {
+                return documentStart;
+            }
+        }
+
         private static List<DocumentCheckIssue> CollectCaptionContinuityIssues(
             Word.Document doc,
+            int scanStart,
             Dictionary<string, int> expectedNumbers,
             DocumentCheckProgress progress)
         {
             List<DocumentCheckIssue> issues = new List<DocumentCheckIssue>();
-            foreach (CaptionListEntry entry in CollectCaptionListEntries(doc))
+            foreach (CaptionListEntry entry in CollectCaptionListEntries(doc).Where(item => item != null && item.Start >= scanStart))
             {
                 ThrowIfOperationCancelled();
                 progress.Step("正在检查题注");
@@ -418,11 +436,12 @@ namespace DocuLint
 
         private static List<DocumentCheckIssue> CollectListContinuityIssuesByOutlineFind(
             Word.Document doc,
+            int scanStart,
             int[] counters,
             DocumentCheckProgress progress)
         {
             List<DocumentCheckIssue> issues = new List<DocumentCheckIssue>();
-            List<Word.Range> headings = CollectOutlineRangesByFind(doc, progress);
+            List<Word.Range> headings = CollectOutlineRangesByFind(doc, scanStart, progress);
             foreach (Word.Range range in headings.OrderBy(item => item.Start))
             {
                 ThrowIfOperationCancelled();
@@ -456,10 +475,10 @@ namespace DocuLint
             return issues;
         }
 
-        private static List<DocumentCheckIssue> CollectNonBodyBlankLineIssuesByOutlineFind(Word.Document doc, DocumentCheckProgress progress)
+        private static List<DocumentCheckIssue> CollectNonBodyBlankLineIssuesByOutlineFind(Word.Document doc, int scanStart, DocumentCheckProgress progress)
         {
             List<DocumentCheckIssue> issues = new List<DocumentCheckIssue>();
-            List<Word.Range> headings = CollectOutlineRangesByFind(doc, progress, includeBlankHeadings: true)
+            List<Word.Range> headings = CollectOutlineRangesByFind(doc, scanStart, progress, includeBlankHeadings: true)
                 .OrderBy(item => item.Start)
                 .ToList();
             foreach (Word.Range range in headings)
@@ -503,11 +522,11 @@ namespace DocuLint
             return string.Empty;
         }
 
-        private static List<DocumentCheckIssue> CollectStyleConsistencyIssues(Word.Document doc, DocumentCheckProgress progress)
+        private static List<DocumentCheckIssue> CollectStyleConsistencyIssues(Word.Document doc, int scanStart, DocumentCheckProgress progress)
         {
             List<DocumentCheckIssue> issues = new List<DocumentCheckIssue>();
             Dictionary<int, string> expectedStylesByLevel = new Dictionary<int, string>();
-            foreach (Word.Range range in CollectOutlineRangesByFind(doc, progress).OrderBy(item => item.Start))
+            foreach (Word.Range range in CollectOutlineRangesByFind(doc, scanStart, progress).OrderBy(item => item.Start))
             {
                 ThrowIfOperationCancelled();
                 progress.Step("正在检查样式一致性");
@@ -592,6 +611,7 @@ namespace DocuLint
 
         private static List<Word.Range> CollectOutlineRangesByFind(
             Word.Document doc,
+            int scanStart,
             DocumentCheckProgress progress,
             bool includeBlankHeadings = false)
         {
@@ -607,7 +627,7 @@ namespace DocuLint
                 ThrowIfOperationCancelled();
                 progress.Step("正在定位标题");
                 Word.Range searchRange = doc.Content.Duplicate;
-                searchRange.SetRange(doc.Content.Start, doc.Content.End);
+                searchRange.SetRange(scanStart, doc.Content.End);
 
                 Word.Find find = searchRange.Find;
                 find.ClearFormatting();
@@ -649,12 +669,14 @@ namespace DocuLint
             return ranges;
         }
 
-        private static int CountDocumentCheckSteps(Word.Document doc, bool checkBlankLines, bool checkCaptions, bool checkLists, bool checkStyles, bool checkBrokenReferences)
+        private static int CountDocumentCheckSteps(Word.Document doc, int scanStart, bool checkBlankLines, bool checkCaptions, bool checkLists, bool checkStyles, bool checkBrokenReferences)
         {
             int captionCount = 1;
             try
             {
-                captionCount = checkCaptions ? Math.Max(1, CollectCaptionListEntries(doc).Count) : 0;
+                captionCount = checkCaptions
+                    ? Math.Max(1, CollectCaptionListEntries(doc).Count(item => item != null && item.Start >= scanStart))
+                    : 0;
             }
             catch
             {

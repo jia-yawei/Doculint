@@ -27,6 +27,7 @@ namespace DocuLint
         private readonly Button btnImportTarget;
         private readonly Button btnReverseTrace;
         private readonly Button btnExportTable;
+        private readonly Button btnStageTraceMappings;
         private readonly Button btnClearTraceMappings;
         private readonly Button btnToggleIdentifierView;
         private readonly Label lblImportedDocumentName;
@@ -63,6 +64,10 @@ namespace DocuLint
 
         private readonly Dictionary<string, RequirementTraceMapping> mappingsBySourceId =
             new Dictionary<string, RequirementTraceMapping>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, RequirementTraceMapping> forwardMappingsBySourceId =
+            new Dictionary<string, RequirementTraceMapping>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, RequirementTraceMapping> reverseMappingsBySourceId =
+            new Dictionary<string, RequirementTraceMapping>(StringComparer.OrdinalIgnoreCase);
         private readonly List<RequirementItem> currentSourceViewItems = new List<RequirementItem>();
 
         private RequirementTrackingDocumentSnapshot sourceSnapshot;
@@ -70,12 +75,15 @@ namespace DocuLint
         private RequirementTrackingDocumentSnapshot currentDocumentSnapshot;
         private RequirementTrackingDocumentSnapshot externalTargetSnapshot;
         private string sourceDocumentFullName;
+        private string savedExternalTargetPath;
         private RequirementItem selectedSource;
         private string selectedTargetId;
         private bool suppressSourceChanged;
         private bool suppressTargetChanged;
         private bool reverseTrace;
+        private bool reverseMappingsInitialized;
         private bool compactIdentifierView;
+        private bool suppressTraceTemplateChanged;
 
         internal RequirementTrackingConsoleControl(Func<Word.Application> applicationAccessor)
         {
@@ -111,6 +119,10 @@ namespace DocuLint
             btnExportTable.Dock = DockStyle.None;
             btnExportTable.Width = 120;
             btnExportTable.Click += (_, __) => ExportTraceTable();
+            btnStageTraceMappings = CreatePrimaryButton("暂存追踪");
+            btnStageTraceMappings.Dock = DockStyle.None;
+            btnStageTraceMappings.Width = 120;
+            btnStageTraceMappings.Click += (_, __) => StageTraceMappings();
             btnClearTraceMappings = CreatePrimaryButton("清空追踪关系");
             btnClearTraceMappings.Dock = DockStyle.None;
             btnClearTraceMappings.Width = 156;
@@ -120,6 +132,7 @@ namespace DocuLint
             btnToggleIdentifierView.Width = 120;
             btnToggleIdentifierView.Click += (_, __) => ToggleIdentifierView();
             header.Controls.Add(btnExportTable);
+            header.Controls.Add(btnStageTraceMappings);
             header.Controls.Add(btnClearTraceMappings);
             header.Controls.Add(btnToggleIdentifierView);
 
@@ -286,8 +299,11 @@ namespace DocuLint
             currentDocumentSnapshot = BuildSavedSnapshot(document);
             externalTargetSnapshot = null;
             reverseTrace = false;
+            RestoreSavedTrackingSession(document);
             ApplyTemplateDataSources();
             LoadTraceMappingsFromSourceDocument();
+            RestoreSavedExternalTarget();
+            ApplyTemplateDataSources();
             selectedSource = GetFilteredSourceRequirements().FirstOrDefault();
             RenderSources(selectedSource?.Id);
             RenderTargets();
@@ -415,12 +431,35 @@ namespace DocuLint
 
         private void ReverseTraceDirection()
         {
+            SaveTraceMappingsToSourceDocument();
             reverseTrace = !reverseTrace;
             selectedSource = null;
             selectedTargetId = null;
             ApplyTemplateDataSources();
             LoadTraceMappingsFromSourceDocument();
+
+            if (reverseTrace && !reverseMappingsInitialized)
+            {
+                if (ShouldPreserveForwardMappingsWhenReverseTracing())
+                {
+                    CopyMappings(TransposeMappings(forwardMappingsBySourceId), reverseMappingsBySourceId);
+                }
+                else
+                {
+                    reverseMappingsBySourceId.Clear();
+                }
+
+                reverseMappingsInitialized = true;
+                CopyMappings(reverseMappingsBySourceId, mappingsBySourceId);
+                SaveTraceMappingsToSourceDocument();
+            }
+
             RefreshViewPreservingSelection();
+        }
+
+        private static bool ShouldPreserveForwardMappingsWhenReverseTracing()
+        {
+            return Globals.ThisAddIn?.PreserveForwardMappingsWhenReverseTracing ?? true;
         }
 
         private void ApplyTemplateDataSources()
@@ -582,6 +621,52 @@ namespace DocuLint
             RenderTargets();
         }
 
+        private void StageTraceMappings()
+        {
+            Word.Document activeDocument = GetApplication()?.ActiveDocument;
+            if (activeDocument == null || currentDocumentSnapshot == null)
+            {
+                MessageBox.Show(this, "当前没有可暂存的追踪文档。", "需求追踪");
+                return;
+            }
+
+            try
+            {
+                SaveTraceMappingsToSourceDocument();
+
+                bool closeAfterUse;
+                Word.Document document = GetSourceDocument(true, out closeAfterUse);
+                if (document == null)
+                {
+                    MessageBox.Show(this, "追踪关系已写入当前文档，但无法保存 Word 文档。请手动保存文档。", "需求追踪", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                try
+                {
+                    document.Save();
+                }
+                finally
+                {
+                    if (closeAfterUse)
+                    {
+                        CloseBackgroundDocument(document);
+                        ActivateDocument(activeDocument);
+                    }
+                    else
+                    {
+                        ReleaseComObject(document);
+                    }
+                }
+
+                MessageBox.Show(this, "当前追踪关系已暂存到文档。下次打开文档后可以继续追踪。", "需求追踪", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "暂存追踪关系失败：\r\n" + ex.Message, "需求追踪", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
         private List<RequirementTraceExportRow> BuildTraceExportRows()
         {
             Dictionary<string, RequirementItem> targetById = (targetSnapshot?.Requirements ?? new List<RequirementItem>())
@@ -640,6 +725,11 @@ namespace DocuLint
 
         private RequirementTrackingDocumentSnapshot BuildSavedSnapshot(Word.Document document)
         {
+            return BuildSavedSnapshot(document, true);
+        }
+
+        private RequirementTrackingDocumentSnapshot BuildSavedSnapshot(Word.Document document, bool showWarning)
+        {
             string fullName = NormalizeFilePath(document?.FullName);
             RequirementTrackingDocumentSnapshot snapshot = new RequirementTrackingDocumentSnapshot
             {
@@ -648,7 +738,7 @@ namespace DocuLint
                 Requirements = RequirementExtractionPaneControl.LoadSavedRequirementItems(document) ?? new List<RequirementItem>()
             };
 
-            if (snapshot.Requirements.Count == 0)
+            if (showWarning && snapshot.Requirements.Count == 0)
             {
                 MessageBox.Show(this, $"{snapshot.DisplayName} 中没有已保存的需求提取结果。\r\n请先在该文档中使用“需求提取”并点击“保存”。", "需求追踪");
             }
@@ -1201,7 +1291,11 @@ namespace DocuLint
 
         private void LoadTraceMappings(Word.Document doc)
         {
+            savedExternalTargetPath = null;
             mappingsBySourceId.Clear();
+            forwardMappingsBySourceId.Clear();
+            reverseMappingsBySourceId.Clear();
+            reverseMappingsInitialized = false;
             Office.CustomXMLPart part = FindSavedTraceMappingPart(doc);
             if (part == null)
             {
@@ -1213,10 +1307,19 @@ namespace DocuLint
                 XDocument document = XDocument.Parse(part.XML);
                 XName mappingName = XName.Get("mapping", SavedTraceMappingsNamespace);
                 XName targetName = XName.Get("target", SavedTraceMappingsNamespace);
+                XName directionStateName = XName.Get("directionState", SavedTraceMappingsNamespace);
+                XName sessionName = XName.Get("session", SavedTraceMappingsNamespace);
                 string currentTemplate = GetTraceTemplateStorageKey();
-                bool hasTemplateTags = document.Descendants(mappingName).Any(element => element.Attribute("template") != null);
-                Dictionary<string, RequirementTraceMapping> canonicalMappings =
-                    new Dictionary<string, RequirementTraceMapping>(StringComparer.OrdinalIgnoreCase);
+                XElement session = document.Descendants(sessionName)
+                    .FirstOrDefault(element => IsTemplateStorageAlias(
+                        (string)element.Attribute("template") ?? string.Empty,
+                        currentTemplate));
+                savedExternalTargetPath = NormalizeFilePath((string)session?.Attribute("targetDocument"));
+                bool hasTemplateTags = document.Descendants(mappingName).Any(element => element.Attribute("template") != null)
+                    || document.Descendants(directionStateName).Any(element => element.Attribute("template") != null);
+                bool hasReverseStorage = document.Descendants(directionStateName).Any(element =>
+                    IsTemplateStorageAlias((string)element.Attribute("template") ?? string.Empty, currentTemplate)
+                    && string.Equals((string)element.Attribute("direction") ?? string.Empty, "reverse", StringComparison.OrdinalIgnoreCase));
                 foreach (XElement mappingElement in document.Descendants(mappingName))
                 {
                     string template = (string)mappingElement.Attribute("template") ?? string.Empty;
@@ -1225,6 +1328,11 @@ namespace DocuLint
                         continue;
                     }
 
+                    string direction = (string)mappingElement.Attribute("direction") ?? string.Empty;
+                    bool explicitReverse = string.Equals(direction, "reverse", StringComparison.OrdinalIgnoreCase);
+                    bool explicitDirection = string.Equals(direction, "forward", StringComparison.OrdinalIgnoreCase)
+                        || explicitReverse;
+                    bool legacyReverse = !explicitDirection && IsReverseTemplateAlias(template, currentTemplate);
                     string sourceId = (string)mappingElement.Attribute("sourceId") ?? string.Empty;
                     if (string.IsNullOrWhiteSpace(sourceId))
                     {
@@ -1236,22 +1344,138 @@ namespace DocuLint
                         string targetId = (string)targetElement.Attribute("id") ?? string.Empty;
                         if (!string.IsNullOrWhiteSpace(targetId))
                         {
-                            bool legacyReverse = IsReverseTemplateAlias(template, currentTemplate);
                             AddMappingPair(
-                                canonicalMappings,
-                                legacyReverse ? targetId : sourceId,
-                                legacyReverse ? sourceId : targetId);
+                                explicitReverse ? reverseMappingsBySourceId : forwardMappingsBySourceId,
+                                explicitReverse || legacyReverse ? targetId : sourceId,
+                                explicitReverse || legacyReverse ? sourceId : targetId);
                         }
                     }
                 }
 
-                CopyMappings(
-                    reverseTrace ? TransposeMappings(canonicalMappings) : canonicalMappings,
-                    mappingsBySourceId);
+                reverseMappingsInitialized = hasReverseStorage
+                    || document.Descendants(mappingName).Any(element =>
+                        IsTemplateStorageAlias((string)element.Attribute("template") ?? string.Empty, currentTemplate)
+                        && string.Equals((string)element.Attribute("direction") ?? string.Empty, "reverse", StringComparison.OrdinalIgnoreCase));
+                if (!reverseMappingsInitialized)
+                {
+                    CopyMappings(TransposeMappings(forwardMappingsBySourceId), reverseMappingsBySourceId);
+                }
+
+                CopyMappings(reverseTrace ? reverseMappingsBySourceId : forwardMappingsBySourceId, mappingsBySourceId);
             }
             catch
             {
                 mappingsBySourceId.Clear();
+                forwardMappingsBySourceId.Clear();
+                reverseMappingsBySourceId.Clear();
+                reverseMappingsInitialized = false;
+            }
+        }
+
+        private void RestoreSavedExternalTarget()
+        {
+            if (string.IsNullOrWhiteSpace(savedExternalTargetPath) ||
+                GetCurrentTraceTemplate() == RequirementTraceTemplate.SdsToSdd ||
+                string.Equals(savedExternalTargetPath, sourceDocumentFullName, StringComparison.OrdinalIgnoreCase) ||
+                !File.Exists(savedExternalTargetPath))
+            {
+                return;
+            }
+
+            Word.Application app = GetApplication();
+            if (app == null)
+            {
+                return;
+            }
+
+            Word.Document foregroundDocument = null;
+            Word.Document targetDocument = null;
+            bool closeAfterLoad = false;
+            try
+            {
+                foregroundDocument = app.ActiveDocument;
+                foreach (Word.Document openDocument in app.Documents)
+                {
+                    if (string.Equals(
+                        NormalizeFilePath(openDocument?.FullName),
+                        savedExternalTargetPath,
+                        StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetDocument = openDocument;
+                        break;
+                    }
+                }
+
+                if (targetDocument == null)
+                {
+                    targetDocument = app.Documents.Open(
+                        FileName: savedExternalTargetPath,
+                        ReadOnly: true,
+                        AddToRecentFiles: false,
+                        Visible: false);
+                    closeAfterLoad = true;
+                }
+
+                externalTargetSnapshot = BuildSavedSnapshot(targetDocument, false);
+            }
+            catch
+            {
+                externalTargetSnapshot = null;
+            }
+            finally
+            {
+                if (closeAfterLoad)
+                {
+                    CloseBackgroundDocument(targetDocument);
+                    ActivateDocument(foregroundDocument);
+                }
+            }
+        }
+
+        private void RestoreSavedTrackingSession(Word.Document document)
+        {
+            if (document == null || cmbTraceTemplate == null)
+            {
+                return;
+            }
+
+            try
+            {
+                Office.CustomXMLPart part = FindSavedTraceMappingPart(document);
+                if (part == null)
+                {
+                    return;
+                }
+
+                XDocument xml = XDocument.Parse(part.XML);
+                XName sessionName = XName.Get("session", SavedTraceMappingsNamespace);
+                XElement session = xml.Descendants(sessionName).LastOrDefault();
+                if (session == null)
+                {
+                    return;
+                }
+
+                string template = (string)session.Attribute("template") ?? string.Empty;
+                int templateIndex = string.Equals(template, "SdsToSdd", StringComparison.OrdinalIgnoreCase)
+                    ? 1
+                    : string.Equals(template, "Custom", StringComparison.OrdinalIgnoreCase) ? 2 : 0;
+                suppressTraceTemplateChanged = true;
+                try
+                {
+                    cmbTraceTemplate.SelectedIndex = templateIndex;
+                    reverseTrace = string.Equals(
+                        (string)session.Attribute("direction"),
+                        "reverse",
+                        StringComparison.OrdinalIgnoreCase);
+                }
+                finally
+                {
+                    suppressTraceTemplateChanged = false;
+                }
+            }
+            catch
+            {
+                // An unreadable prior session must not prevent opening the tracking pane.
             }
         }
 
@@ -1345,10 +1569,23 @@ namespace DocuLint
 
             string currentTemplate = GetTraceTemplateStorageKey();
             XName mappingName = XName.Get("mapping", SavedTraceMappingsNamespace);
+            XName directionStateName = XName.Get("directionState", SavedTraceMappingsNamespace);
+            XName sessionName = XName.Get("session", SavedTraceMappingsNamespace);
             bool hasTemplateTags = root.Elements(mappingName).Any(element => element.Attribute("template") != null);
+            hasTemplateTags = hasTemplateTags || root.Elements(directionStateName).Any(element => element.Attribute("template") != null);
             if (hasTemplateTags)
             {
                 root.Elements(mappingName)
+                    .Where(element => IsTemplateStorageAlias(
+                        (string)element.Attribute("template") ?? string.Empty,
+                        currentTemplate))
+                    .Remove();
+                root.Elements(directionStateName)
+                    .Where(element => IsTemplateStorageAlias(
+                        (string)element.Attribute("template") ?? string.Empty,
+                        currentTemplate))
+                    .Remove();
+                root.Elements(sessionName)
                     .Where(element => IsTemplateStorageAlias(
                         (string)element.Attribute("template") ?? string.Empty,
                         currentTemplate))
@@ -1359,16 +1596,40 @@ namespace DocuLint
                 root.Elements(mappingName).Remove();
             }
 
-            Dictionary<string, RequirementTraceMapping> canonicalMappings = reverseTrace
-                ? TransposeMappings(mappingsBySourceId)
-                : CloneMappings(mappingsBySourceId);
-            foreach (RequirementTraceMapping mapping in canonicalMappings.Values
-                .Where(mapping => mapping != null &&
-                                  !string.IsNullOrWhiteSpace(mapping.SourceRequirementId) &&
-                                  mapping.TargetRequirementIds.Any(id => !string.IsNullOrWhiteSpace(id))))
+            CopyMappings(mappingsBySourceId, reverseTrace ? reverseMappingsBySourceId : forwardMappingsBySourceId);
+            AppendStoredMappings(root, mappingName, currentTemplate, "forward", forwardMappingsBySourceId);
+            if (reverseMappingsInitialized)
+            {
+                AppendStoredMappings(root, mappingName, currentTemplate, "reverse", reverseMappingsBySourceId);
+                root.Add(new XElement(directionStateName,
+                    new XAttribute("template", currentTemplate),
+                    new XAttribute("direction", "reverse")));
+            }
+
+            root.Add(new XElement(sessionName,
+                new XAttribute("template", currentTemplate),
+                new XAttribute("direction", reverseTrace ? "reverse" : "forward"),
+                new XAttribute("targetDocument", externalTargetSnapshot?.FullName ?? string.Empty)));
+
+            return root.ToString(SaveOptions.DisableFormatting);
+        }
+
+        private static void AppendStoredMappings(
+            XElement root,
+            XName mappingName,
+            string template,
+            string direction,
+            IDictionary<string, RequirementTraceMapping> mappings)
+        {
+            foreach (RequirementTraceMapping mapping in (mappings ??
+                new Dictionary<string, RequirementTraceMapping>()).Values
+                .Where(item => item != null &&
+                               !string.IsNullOrWhiteSpace(item.SourceRequirementId) &&
+                               item.TargetRequirementIds.Any(id => !string.IsNullOrWhiteSpace(id))))
             {
                 root.Add(new XElement(mappingName,
-                    new XAttribute("template", currentTemplate),
+                    new XAttribute("template", template),
+                    new XAttribute("direction", direction),
                     new XAttribute("sourceId", mapping.SourceRequirementId ?? string.Empty),
                     mapping.TargetRequirementIds
                         .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -1377,8 +1638,6 @@ namespace DocuLint
                             new XElement(XName.Get("target", SavedTraceMappingsNamespace),
                                 new XAttribute("id", id)))));
             }
-
-            return root.ToString(SaveOptions.DisableFormatting);
         }
 
         private string GetTraceTemplateStorageKey()
@@ -2304,6 +2563,11 @@ namespace DocuLint
 
         private void OnTraceTemplateChanged()
         {
+            if (suppressTraceTemplateChanged)
+            {
+                return;
+            }
+
             reverseTrace = false;
             selectedSource = null;
             selectedTargetId = null;

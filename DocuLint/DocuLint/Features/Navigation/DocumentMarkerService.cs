@@ -38,7 +38,7 @@ namespace DocuLint
     internal static class DocumentMarkerService
     {
         private static readonly Regex RequirementMarkerRegex = new Regex(
-            @"(?<![A-Za-z0-9/])/?(?:(?:[A-Za-z0-9]+(?:/[A-Za-z0-9]+)*-)+)?SRS-\d+(?![A-Za-z0-9])",
+            @"(?<![A-Za-z0-9/])/?(?:(?:[A-Za-z0-9]+(?:/[A-Za-z0-9]+)*-)+)?SRS-[^-\s]+(?:-[^-\s]+)*(?![-A-Za-z0-9])",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex TestMarkerRegex = new Regex(
@@ -46,11 +46,11 @@ namespace DocuLint
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex SystemMarkerRegex = new Regex(
-            @"(?<![A-Za-z0-9/])/?(?:(?:[A-Za-z0-9]+(?:/[A-Za-z0-9]+)*-)+)?SSS-\d+(?![A-Za-z0-9])",
+            @"(?<![A-Za-z0-9/])/?(?:(?:[A-Za-z0-9]+(?:/[A-Za-z0-9]+)*-)+)?(?:SSS|SDTD)-[^-\s]+(?:-[^-\s]+)*(?![-A-Za-z0-9])",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex SoftwareDesignMarkerRegex = new Regex(
-            @"(?<![A-Za-z0-9/])/?(?:(?:[A-Za-z0-9]+(?:/[A-Za-z0-9]+)*-)+)?(?:SDS|SDD)-\d+(?![A-Za-z0-9])",
+            @"(?<![A-Za-z0-9/])/?(?:(?:[A-Za-z0-9]+(?:/[A-Za-z0-9]+)*-)+)?(?:SDS|SDD)-[^-\s]+(?:-[^-\s]+)*(?![-A-Za-z0-9])",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private static readonly Regex SlashSeparatedMarkerRegex = new Regex(
@@ -59,16 +59,60 @@ namespace DocuLint
 
         public static DocumentMarkerCollectionResult CollectMarkers(Word.Document doc)
         {
-            return CollectMarkers(doc, Enumerable.Empty<string>());
+            return CollectMarkers(doc, Enumerable.Empty<string>(), 0, 0);
         }
 
         public static DocumentMarkerCollectionResult CollectMarkers(
             Word.Document doc,
-            IEnumerable<string> markerIdentifiers)
+            IEnumerable<string> markerTemplates)
+        {
+            return CollectMarkers(doc, markerTemplates, 0, 0);
+        }
+
+        public static DocumentMarkerCollectionResult CollectMarkers(
+            Word.Document doc,
+            IEnumerable<string> markerTemplates,
+            int startPage,
+            int endPage)
+        {
+            return CollectMarkers(
+                doc,
+                markerTemplates,
+                startPage,
+                endPage,
+                DocumentMarkerDocumentType.Unknown,
+                false);
+        }
+
+        public static DocumentMarkerCollectionResult CollectMarkers(
+            Word.Document doc,
+            IEnumerable<string> markerTemplates,
+            int startPage,
+            int endPage,
+            DocumentMarkerDocumentType presetTemplateType)
+        {
+            return CollectMarkers(
+                doc,
+                markerTemplates,
+                startPage,
+                endPage,
+                presetTemplateType,
+                false);
+        }
+
+        public static DocumentMarkerCollectionResult CollectMarkers(
+            Word.Document doc,
+            IEnumerable<string> markerTemplates,
+            int startPage,
+            int endPage,
+            DocumentMarkerDocumentType presetTemplateType,
+            bool scanFieldResults)
         {
             DocumentMarkerCollectionResult result = new DocumentMarkerCollectionResult
             {
-                DocumentType = DetectDocumentType(doc)
+                DocumentType = presetTemplateType == DocumentMarkerDocumentType.Unknown
+                    ? DetectDocumentType(doc)
+                    : presetTemplateType
             };
 
             if (doc == null)
@@ -76,11 +120,39 @@ namespace DocuLint
                 return result;
             }
 
-            List<Regex> customMarkerPatterns = BuildCustomMarkerRegexes(markerIdentifiers);
+            List<Regex> customMarkerPatterns = BuildCustomMarkerRegexes(markerTemplates, 0);
             IEnumerable<Regex> patterns = customMarkerPatterns.Count == 0
                 ? GetMarkerPatterns(result.DocumentType)
                 : customMarkerPatterns;
             int scanStart = GetScanStartAfterToc(doc);
+            int scanEnd = doc.Content?.End ?? int.MaxValue;
+            bool hasPageRange = startPage > 0 || endPage > 0;
+            bool usePrecisePageFilter = false;
+            DocumentRangeSpan pageRange = new DocumentRangeSpan(0, int.MaxValue);
+            if (hasPageRange)
+            {
+                // Word 文档可能在分节后重新开始页码。字符位置的 GoTo 页范围
+                // 在这种情况下不一定对应界面显示的页码，因此段落扫描时
+                // 优先使用 Range.Information 返回的实际页码进行筛选。
+                if (!TryGetPageScanRange(doc, startPage, endPage, out pageRange))
+                {
+                    pageRange = new DocumentRangeSpan(0, scanEnd);
+                }
+
+                scanStart = Math.Max(scanStart, pageRange.Start);
+                scanEnd = Math.Min(scanEnd, pageRange.End);
+                if (scanEnd <= scanStart)
+                {
+                    return result;
+                }
+
+                usePrecisePageFilter = !IsPageRangeBoundaryReliable(
+                    doc,
+                    pageRange,
+                    Math.Max(1, startPage),
+                    Math.Max(Math.Max(1, startPage), endPage));
+            }
+
             Dictionary<string, NavigationPaneEntry> entryMap = new Dictionary<string, NavigationPaneEntry>(StringComparer.OrdinalIgnoreCase);
             List<DocumentRangeSpan> traceTableRanges = CollectRequirementTraceTableRanges(doc);
             int chapterCutoff = GetChapterCutoff(result.DocumentType);
@@ -88,10 +160,31 @@ namespace DocuLint
 
             try
             {
-                foreach (Word.Paragraph paragraph in doc.Paragraphs)
+                Word.Paragraphs paragraphs = doc.Paragraphs;
+                if (hasPageRange)
+                {
+                    Word.Range scanRange = doc.Range(scanStart, scanEnd);
+                    paragraphs = scanRange.Paragraphs;
+                }
+
+                foreach (Word.Paragraph paragraph in paragraphs)
                 {
                     Word.Range range = paragraph?.Range;
                     if (range == null || range.End <= scanStart)
+                    {
+                        continue;
+                    }
+
+                    if (range.Start >= scanEnd)
+                    {
+                        break;
+                    }
+
+                    if (usePrecisePageFilter && !IsRangeOnRequestedPages(
+                        range,
+                        Math.Max(1, startPage),
+                        Math.Max(Math.Max(1, startPage), endPage),
+                        pageRange))
                     {
                         continue;
                     }
@@ -122,6 +215,22 @@ namespace DocuLint
             {
             }
 
+            if (scanFieldResults)
+            {
+                ScanFieldResultMarkers(
+                    doc,
+                    patterns,
+                    entryMap,
+                    scanStart,
+                    scanEnd,
+                    hasPageRange,
+                    usePrecisePageFilter,
+                    startPage,
+                    endPage,
+                    pageRange,
+                    traceTableRanges);
+            }
+
             result.Entries = entryMap.Values
                 .OrderBy(item => item.Start)
                 .ThenBy(item => item.Text, StringComparer.OrdinalIgnoreCase)
@@ -130,7 +239,162 @@ namespace DocuLint
             return result;
         }
 
-        private static List<Regex> BuildCustomMarkerRegexes(IEnumerable<string> markerIdentifiers)
+        private static void ScanFieldResultMarkers(
+            Word.Document doc,
+            IEnumerable<Regex> patterns,
+            Dictionary<string, NavigationPaneEntry> entryMap,
+            int scanStart,
+            int scanEnd,
+            bool hasPageRange,
+            bool usePrecisePageFilter,
+            int requestedStartPage,
+            int requestedEndPage,
+            DocumentRangeSpan pageRange,
+            IEnumerable<DocumentRangeSpan> traceTableRanges)
+        {
+            if (doc?.Fields == null || patterns == null || entryMap == null)
+            {
+                return;
+            }
+
+            try
+            {
+                foreach (Word.Field field in doc.Fields)
+                {
+                    Word.Range resultRange = field?.Result;
+                    if (resultRange == null ||
+                        resultRange.End <= scanStart ||
+                        resultRange.Start >= scanEnd ||
+                        IsWithinAnyRange(resultRange.Start, traceTableRanges))
+                    {
+                        continue;
+                    }
+
+                    if (hasPageRange && usePrecisePageFilter && !IsRangeOnRequestedPages(
+                        resultRange,
+                        Math.Max(1, requestedStartPage),
+                        Math.Max(Math.Max(1, requestedStartPage), requestedEndPage),
+                        pageRange))
+                    {
+                        continue;
+                    }
+
+                    string text = NormalizeParagraphText(resultRange.Text);
+                    if (string.IsNullOrWhiteSpace(text))
+                    {
+                        continue;
+                    }
+
+                    foreach (Regex pattern in patterns)
+                    {
+                        AddMarkerEntries(entryMap, resultRange, text, pattern);
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static bool IsPageRangeBoundaryReliable(
+            Word.Document doc,
+            DocumentRangeSpan pageRange,
+            int requestedStartPage,
+            int requestedEndPage)
+        {
+            if (doc?.Content == null || pageRange.End <= pageRange.Start)
+            {
+                return false;
+            }
+
+            try
+            {
+                int probeEnd = Math.Min(pageRange.End, doc.Content.End);
+                if (probeEnd <= pageRange.Start)
+                {
+                    return false;
+                }
+
+                Word.Range probe = doc.Range(pageRange.Start, probeEnd);
+                int actualStartPage = GetRangePageNumber(probe, false);
+                int actualEndPage = GetRangePageNumber(probe, true);
+                return actualStartPage == requestedStartPage &&
+                       actualEndPage >= requestedStartPage &&
+                       actualEndPage <= requestedEndPage;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsRangeOnRequestedPages(
+            Word.Range range,
+            int requestedStartPage,
+            int requestedEndPage,
+            DocumentRangeSpan fallbackPageRange)
+        {
+            if (range == null)
+            {
+                return false;
+            }
+
+            int startPage = GetRangePageNumber(range, false);
+            int endPage = GetRangePageNumber(range, true);
+            if (startPage > 0 || endPage > 0)
+            {
+                if (startPage <= 0)
+                {
+                    startPage = endPage;
+                }
+
+                if (endPage <= 0)
+                {
+                    endPage = startPage;
+                }
+
+                return endPage >= requestedStartPage && startPage <= requestedEndPage;
+            }
+
+            // 某些 Word 兼容实现不支持 Range.Information，回退到字符位置范围。
+            return range.End > fallbackPageRange.Start && range.Start < fallbackPageRange.End;
+        }
+
+        private static int GetRangePageNumber(Word.Range range, bool atEnd)
+        {
+            if (range == null)
+            {
+                return 0;
+            }
+
+            try
+            {
+                Word.Range probe = range.Duplicate;
+                if (atEnd)
+                {
+                    probe.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
+                    if (probe.Start > range.Start)
+                    {
+                        probe.MoveStart(Word.WdUnits.wdCharacter, -1);
+                    }
+                }
+                else
+                {
+                    probe.Collapse(Word.WdCollapseDirection.wdCollapseStart);
+                }
+
+                object value = probe.Information[Word.WdInformation.wdActiveEndPageNumber];
+                return Convert.ToInt32(value);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static List<Regex> BuildCustomMarkerRegexes(
+            IEnumerable<string> markerIdentifiers,
+            int numberDigits)
         {
             List<Regex> patterns = new List<Regex>();
             foreach (string value in (markerIdentifiers ?? Enumerable.Empty<string>())
@@ -139,37 +403,59 @@ namespace DocuLint
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Take(3))
             {
-                patterns.Add(BuildCustomMarkerRegex(value));
+                patterns.Add(BuildCustomMarkerRegex(value, numberDigits));
             }
 
             return patterns;
         }
 
-        private static Regex BuildCustomMarkerRegex(string markerIdentifier)
+        private static Regex BuildCustomMarkerRegex(string markerIdentifier, int numberDigits)
         {
             string format = (markerIdentifier ?? string.Empty).Trim().TrimStart('/');
+            if (format.IndexOf('#') >= 0)
+            {
+                return BuildWildcardMarkerRegex(format);
+            }
+
             if (Regex.IsMatch(format, @"^[A-Za-z][A-Za-z0-9_]*$"))
             {
+                string digits = numberDigits > 0 ? @"\d{" + numberDigits + "}" : @"\d+";
                 return new Regex(
                     @"(?<![A-Za-z0-9/])/?(?:(?:[A-Za-z0-9]+(?:/[A-Za-z0-9]+)*-)+)?"
                     + Regex.Escape(format)
-                    + @"-\d+(?![A-Za-z0-9])",
+                    + "-" + digits + @"(?![A-Za-z0-9])",
                     RegexOptions.IgnoreCase | RegexOptions.Compiled);
             }
 
             Match trailingNumber = Regex.Match(format, @"(?<prefix>.*?)(?<number>\d+)$");
             if (!trailingNumber.Success)
             {
+                string digits = numberDigits > 0 ? @"\d{" + numberDigits + "}" : @"\d+";
                 return new Regex(
-                    "(?<![A-Za-z0-9/])/?" + Regex.Escape(format) + "(?![A-Za-z0-9])",
+                    "(?<![A-Za-z0-9/])/?" + Regex.Escape(format.TrimEnd('-'))
+                    + "-" + digits + "(?![A-Za-z0-9])",
                     RegexOptions.IgnoreCase | RegexOptions.Compiled);
             }
 
             string prefix = Regex.Escape(trailingNumber.Groups["prefix"].Value);
-            int digitCount = trailingNumber.Groups["number"].Value.Length;
+            int digitCount = numberDigits > 0 ? numberDigits : trailingNumber.Groups["number"].Value.Length;
             return new Regex(
                 "(?<![A-Za-z0-9/])/?" + prefix + @"\d{" + digitCount + "}(?![A-Za-z0-9])",
                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        }
+
+        private static Regex BuildWildcardMarkerRegex(string template)
+        {
+            StringBuilder pattern = new StringBuilder(@"(?<![A-Za-z0-9/])/?");
+            foreach (char character in template ?? string.Empty)
+            {
+                pattern.Append(character == '#'
+                    ? @"[^-\s]+"
+                    : Regex.Escape(character.ToString()));
+            }
+
+            pattern.Append(@"(?![-A-Za-z0-9])");
+            return new Regex(pattern.ToString(), RegexOptions.IgnoreCase | RegexOptions.Compiled);
         }
 
         private static List<DocumentRangeSpan> CollectRequirementTraceTableRanges(Word.Document doc)
@@ -349,7 +635,7 @@ namespace DocuLint
             }
         }
 
-        private static DocumentMarkerDocumentType DetectDocumentType(Word.Document doc)
+        internal static DocumentMarkerDocumentType DetectDocumentType(Word.Document doc)
         {
             string sample = BuildSampleText(doc);
             if (string.IsNullOrWhiteSpace(sample))
@@ -607,6 +893,65 @@ namespace DocuLint
             }
 
             return false;
+        }
+
+        private static bool TryGetPageScanRange(
+            Word.Document doc,
+            int requestedStartPage,
+            int requestedEndPage,
+            out DocumentRangeSpan pageRange)
+        {
+            pageRange = new DocumentRangeSpan(0, 0);
+            if (doc?.Content == null)
+            {
+                return false;
+            }
+
+            int startPage = Math.Max(1, requestedStartPage);
+            int endPage = Math.Max(startPage, requestedEndPage);
+            try
+            {
+                doc.Repaginate();
+                int pageCount = doc.ComputeStatistics(Word.WdStatistic.wdStatisticPages, false);
+                if (pageCount <= 0 || startPage > pageCount)
+                {
+                    return false;
+                }
+
+                endPage = Math.Min(endPage, pageCount);
+                object what = Word.WdGoToItem.wdGoToPage;
+                object which = Word.WdGoToDirection.wdGoToAbsolute;
+                object count = startPage;
+                Word.Range startRange = doc.GoTo(ref what, ref which, ref count);
+                if (startRange == null)
+                {
+                    return false;
+                }
+
+                int start = startRange.Start;
+                int end = doc.Content.End;
+                if (endPage < pageCount)
+                {
+                    count = endPage + 1;
+                    Word.Range nextRange = doc.GoTo(ref what, ref which, ref count);
+                    if (nextRange != null && nextRange.Start > start)
+                    {
+                        end = nextRange.Start;
+                    }
+                }
+
+                if (end <= start)
+                {
+                    return false;
+                }
+
+                pageRange = new DocumentRangeSpan(start, end);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static int GetScanStartAfterToc(Word.Document doc)
