@@ -4,5 +4,5 @@
   "Notes": "修复更新下载与安装问题，增加下载进度显示，并优化更新源选择。",
   "PackageUrl": "https://raw.githubusercontent.com/jia-yawei/Doculint/main/update/DocuLint-0.0.1.7-setup.exe",
   "PackageFileName": "DocuLint-0.0.1.7-setup.exe",
-  "Sha256": "13D4B0CBEAC174AAD8D42753B03849E060014B49024A919A2017A0CF1BD50CAD"
+  "Sha256": "91E202CF72296EC0E848D1EFFA20572485D59F956D1538E3080ED3ADED633519"
 }
