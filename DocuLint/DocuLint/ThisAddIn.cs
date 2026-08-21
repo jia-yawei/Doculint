@@ -384,11 +384,10 @@ namespace DocuLint
                 }
 
                 Word.Range selectedRange = selection.Range;
-                int replacementStart = selectedRange.Start;
-                int replacementEnd = selectedRange.End;
+                Word.Range replacementRange = selectedRange.Duplicate;
                 string input = selectedRange.Text ?? string.Empty;
-                if (replacementStart == replacementEnd
-                    && !TryGetTrailingInput(document, replacementEnd, out replacementStart, out input))
+                if (replacementRange.Start == replacementRange.End
+                    && !TryGetTrailingInput(selection, out replacementRange, out input))
                 {
                     return;
                 }
@@ -411,8 +410,7 @@ namespace DocuLint
                 commonPhraseSuggestionForm = new CommonPhraseSuggestionForm(
                     () => Application,
                     GetDocumentKey(document),
-                    replacementStart,
-                    replacementEnd,
+                    replacementRange,
                     suggestions);
                 commonPhraseSuggestionForm.FormClosed += (_, __) => commonPhraseSuggestionForm = null;
                 commonPhraseSuggestionForm.ShowAt(application);
@@ -441,16 +439,28 @@ namespace DocuLint
         }
 
         private static bool TryGetTrailingInput(
-            Word.Document document,
-            int caret,
-            out int inputStart,
+            Word.Selection selection,
+            out Word.Range inputRange,
             out string input)
         {
-            inputStart = caret;
+            inputRange = null;
             input = string.Empty;
             try
             {
-                Word.Range probe = document.Range(Math.Max(0, caret - 240), caret);
+                Word.Range selectionRange = selection?.Range;
+                if (selectionRange == null || selectionRange.Start != selectionRange.End)
+                {
+                    return false;
+                }
+
+                int caret = selectionRange.Start;
+                Word.Range probe = selectionRange.Paragraphs[1].Range.Duplicate;
+                probe.End = caret;
+                if (probe.Start < caret - 240)
+                {
+                    probe.Start = caret - 240;
+                }
+
                 string text = probe.Text ?? string.Empty;
                 int tailStart = text.Length;
                 while (tailStart > 0)
@@ -480,7 +490,9 @@ namespace DocuLint
 
                 int leadingWhitespace = text.Substring(tailStart).Length
                     - text.Substring(tailStart).TrimStart().Length;
-                inputStart = probe.Start + tailStart + leadingWhitespace;
+                inputRange = probe.Duplicate;
+                inputRange.Start = probe.Start + tailStart + leadingWhitespace;
+                inputRange.End = caret;
                 input = candidate;
                 return true;
             }

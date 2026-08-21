@@ -12,8 +12,7 @@ namespace DocuLint
     {
         private readonly Func<Word.Application> applicationAccessor;
         private readonly string documentKey;
-        private readonly int replacementStart;
-        private readonly int replacementEnd;
+        private readonly Word.Range replacementRange;
         private readonly ListBox suggestionList;
         private readonly ToolTip phraseToolTip;
         private bool closing;
@@ -21,14 +20,12 @@ namespace DocuLint
         internal CommonPhraseSuggestionForm(
             Func<Word.Application> applicationAccessor,
             string documentKey,
-            int replacementStart,
-            int replacementEnd,
+            Word.Range replacementRange,
             IReadOnlyList<CommonPhraseLibrary.Suggestion> suggestions)
         {
             this.applicationAccessor = applicationAccessor;
             this.documentKey = documentKey ?? string.Empty;
-            this.replacementStart = replacementStart;
-            this.replacementEnd = replacementEnd;
+            this.replacementRange = replacementRange?.Duplicate;
 
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
@@ -176,16 +173,18 @@ namespace DocuLint
             {
                 Word.Application application = applicationAccessor?.Invoke();
                 Word.Document document = application?.ActiveDocument;
-                if (document == null || !string.Equals(GetDocumentKey(document), documentKey, StringComparison.OrdinalIgnoreCase))
+                if (document == null
+                    || replacementRange == null
+                    || !string.Equals(GetDocumentKey(document), documentKey, StringComparison.OrdinalIgnoreCase))
                 {
                     HideSuggestion();
                     return;
                 }
 
-                Word.Range replacement = document.Range(replacementStart, replacementEnd);
+                document.Activate();
+                Word.Range replacement = replacementRange.Duplicate;
                 replacement.Text = suggestion.Phrase;
                 replacement.Select();
-                document.Activate();
             }
             catch (Exception ex)
             {
