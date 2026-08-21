@@ -393,6 +393,7 @@
     <Compile Include="Features\QuickTools\CommonPhrasesPaneControl.cs">
       <SubType>UserControl</SubType>
     </Compile>
+    <Compile Include="Features\QuickTools\CommonPhraseSuggestionForm.cs" />
     <Compile Include="Features\TablesAndFigures\TablesAndFiguresRibbonActions.cs">
       <SubType>Component</SubType>
     </Compile>

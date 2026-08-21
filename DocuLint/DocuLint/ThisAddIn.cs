@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using Threading = System.Threading;
 using System.Windows.Forms;
 using Word = Microsoft.Office.Interop.Word;
 using Office = Microsoft.Office.Core;
@@ -19,6 +20,8 @@ namespace DocuLint
         // 与插件绑定的常用语任务窗格，不随文档切换清空。
         private CommonPhrasesPaneControl commonPhrasesPaneControl;
         private CustomTaskPane commonPhrasesTaskPane;
+        private CommonPhraseSuggestionForm commonPhraseSuggestionForm;
+        private Threading.SynchronizationContext uiSynchronizationContext;
         // 需求追踪控制台界面控件
         private RequirementTrackingConsoleControl requirementTrackingConsoleControl;
         // 需求追踪独立任务窗格
@@ -68,6 +71,8 @@ namespace DocuLint
         // 插件启动时执行
         private void ThisAddIn_Startup(object sender, System.EventArgs e)
         {
+            uiSynchronizationContext = Threading.SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+            Ribbon1.EnableCommonPhraseShortcutHook();
             // 初始化文档跳转工具
             documentHostAdapter = new WordDocumentHostAdapter(() => Application);
             documentBasicInfoStore = new DocumentBasicInfoStore();
@@ -190,6 +195,8 @@ namespace DocuLint
             RemoveAllRequirementExtractionPanes();
             RemoveTaskPane(ref documentCheckResultTaskPane, ref documentCheckResultPaneControl);
             DisposeRequirementQuickAddPopup();
+            HideCommonPhraseSuggestion();
+            Ribbon1.DisableCommonPhraseShortcutHook();
             RestoreWordSelectionFloaties();
         }
 
@@ -321,6 +328,135 @@ namespace DocuLint
             }
             catch
             {
+            }
+        }
+
+        internal void RequestCommonPhraseSuggestionFromShortcut()
+        {
+            if (uiSynchronizationContext == null)
+            {
+                return;
+            }
+
+            uiSynchronizationContext.Post(_ => ShowCommonPhraseSuggestions(), null);
+        }
+
+        private void ShowCommonPhraseSuggestions()
+        {
+            try
+            {
+                Word.Application application = Application;
+                Word.Document document = application?.ActiveDocument;
+                Word.Selection selection = application?.Selection;
+                if (document == null || selection?.Range == null)
+                {
+                    return;
+                }
+
+                Word.Range selectedRange = selection.Range;
+                int replacementStart = selectedRange.Start;
+                int replacementEnd = selectedRange.End;
+                string input = selectedRange.Text ?? string.Empty;
+                if (replacementStart == replacementEnd
+                    && !TryGetTrailingInput(document, replacementEnd, out replacementStart, out input))
+                {
+                    return;
+                }
+
+                input = input.Trim();
+                if (input.Length < 2)
+                {
+                    return;
+                }
+
+                IReadOnlyList<CommonPhraseLibrary.Suggestion> suggestions =
+                    CommonPhraseLibrary.FindSimilar(input, 6);
+                if (suggestions.Count == 0)
+                {
+                    application.StatusBar = "未找到相似常用语。";
+                    return;
+                }
+
+                HideCommonPhraseSuggestion();
+                commonPhraseSuggestionForm = new CommonPhraseSuggestionForm(
+                    () => Application,
+                    GetDocumentKey(document),
+                    replacementStart,
+                    replacementEnd,
+                    suggestions);
+                commonPhraseSuggestionForm.FormClosed += (_, __) => commonPhraseSuggestionForm = null;
+                commonPhraseSuggestionForm.ShowAt(application);
+            }
+            catch
+            {
+                HideCommonPhraseSuggestion();
+            }
+        }
+
+        private void HideCommonPhraseSuggestion()
+        {
+            try
+            {
+                if (commonPhraseSuggestionForm != null)
+                {
+                    commonPhraseSuggestionForm.HideSuggestion();
+                    commonPhraseSuggestionForm.Dispose();
+                    commonPhraseSuggestionForm = null;
+                }
+            }
+            catch
+            {
+                commonPhraseSuggestionForm = null;
+            }
+        }
+
+        private static bool TryGetTrailingInput(
+            Word.Document document,
+            int caret,
+            out int inputStart,
+            out string input)
+        {
+            inputStart = caret;
+            input = string.Empty;
+            try
+            {
+                Word.Range probe = document.Range(Math.Max(0, caret - 240), caret);
+                string text = probe.Text ?? string.Empty;
+                int tailStart = text.Length;
+                while (tailStart > 0)
+                {
+                    char character = text[tailStart - 1];
+                    if (character == '\r' || character == '\a' || character == '。' || character == '！'
+                        || character == '？' || character == '；' || character == ':' || character == '：'
+                        || character == ',' || character == '，' || character == '.' || character == '!'
+                        || character == '?')
+                    {
+                        break;
+                    }
+
+                    tailStart--;
+                }
+
+                while (tailStart < text.Length && char.IsWhiteSpace(text[tailStart]))
+                {
+                    tailStart++;
+                }
+
+                string candidate = text.Substring(tailStart).TrimEnd();
+                if (candidate.Length < 2)
+                {
+                    return false;
+                }
+
+                int leadingWhitespace = text.Substring(tailStart).Length
+                    - text.Substring(tailStart).TrimStart().Length;
+                inputStart = probe.Start + tailStart + leadingWhitespace;
+                input = candidate;
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -843,6 +979,7 @@ namespace DocuLint
 
         private void Application_WindowActivate(Word.Document doc, Word.Window wn)
         {
+            HideCommonPhraseSuggestion();
             Ribbon1.HandleStyleBrushWindowActivated(doc);
             isSwitchingWordWindow = false;
             SelectRequirementTrackingPaneForWindow(wn, doc);
@@ -866,6 +1003,7 @@ namespace DocuLint
         private void Application_WindowDeactivate(Word.Document doc, Word.Window wn)
         {
             isSwitchingWordWindow = true;
+            HideCommonPhraseSuggestion();
             StopRequirementQuickAddPopup();
             HideRequirementQuickAddPopup();
         }

@@ -510,7 +510,7 @@ namespace DocuLint
             this.btnCommonPhrases.OfficeImageId = "Paste";
             this.btnCommonPhrases.ScreenTip = "显示常用语";
             this.btnCommonPhrases.ShowImage = true;
-            this.btnCommonPhrases.SuperTip = "打开常用语侧边栏，选择后插入当前光标位置。";
+            this.btnCommonPhrases.SuperTip = "打开常用语侧边栏，选择后插入当前光标位置。输入文字后按 Ctrl+Alt+Space 可显示相似常用语候选。";
             this.btnCommonPhrases.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnCommonPhrases_Click);
             // 
             // btnStartDocumentCheck
