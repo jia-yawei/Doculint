@@ -689,7 +689,7 @@ namespace DocuLint
             // btnHelpVersion
             // 
             this.btnHelpVersion.Enabled = false;
-            this.btnHelpVersion.Label = "版本号：0.0.1.7";
+            this.btnHelpVersion.Label = "版本号：0.0.1.8";
             this.btnHelpVersion.Name = "btnHelpVersion";
             this.btnHelpVersion.OfficeImageId = "Info";
             this.btnHelpVersion.ShowImage = true;
