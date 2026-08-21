@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace DocuLint
@@ -17,6 +18,7 @@ namespace DocuLint
         private readonly Button installButton;
         private readonly Button checkButton;
         private readonly Button cancelButton;
+        private bool updateInProgress;
         private PluginUpdateManifest latestManifest;
         private string latestSource;
 
@@ -241,19 +243,60 @@ namespace DocuLint
 
         private void InstallUpdate()
         {
-            if (!FoundNewVersion)
+            if (!FoundNewVersion || updateInProgress)
             {
                 return;
             }
 
-            string error = string.Empty;
-            string packagePath = latestSource == "指定文件夹"
-                ? PluginUpdateService.ResolvePackagePath(latestManifest, localFolderBox.Text.Trim())
-                : PluginUpdateService.DownloadPackage(latestManifest, Path.Combine(Path.GetTempPath(), "DocuLint-updates"), out error);
+            updateInProgress = true;
+            installButton.Enabled = false;
+            checkButton.Enabled = false;
+            cancelButton.Enabled = false;
+            statusHeadingLabel.Text = "正在下载更新";
+            versionSummaryLabel.Text = "最新版本 " + latestManifest.Version;
+            statusLabel.Text = "正在下载安装包，请稍候... Word 仍可正常使用。";
+
+            Task.Run(() =>
+            {
+                string error = string.Empty;
+                string packagePath = latestSource == "指定文件夹"
+                    ? PluginUpdateService.ResolvePackagePath(latestManifest, localFolderBox.Text.Trim())
+                    : PluginUpdateService.DownloadPackage(latestManifest, Path.Combine(Path.GetTempPath(), "DocuLint-updates"), out error);
+                return Tuple.Create(packagePath, error);
+            }).ContinueWith(task =>
+            {
+                if (IsDisposed || !IsHandleCreated)
+                {
+                    return;
+                }
+
+                BeginInvoke(new Action(() => CompleteInstall(task)));
+            }, TaskScheduler.Default);
+        }
+
+        private void CompleteInstall(Task<Tuple<string, string>> downloadTask)
+        {
+            updateInProgress = false;
+            cancelButton.Enabled = true;
+            checkButton.Enabled = true;
+
+            if (downloadTask.IsFaulted)
+            {
+                installButton.Enabled = true;
+                statusHeadingLabel.Text = "下载更新失败";
+                statusLabel.Text = downloadTask.Exception == null
+                    ? "下载安装包失败。"
+                    : "下载安装包失败：" + downloadTask.Exception.GetBaseException().Message;
+                return;
+            }
+
+            string packagePath = downloadTask.Result.Item1;
+            string error = downloadTask.Result.Item2;
             if (string.IsNullOrWhiteSpace(packagePath))
             {
                 statusHeadingLabel.Text = "安装更新失败";
                 statusLabel.Text = "无法取得安装包：" + (error ?? "未找到文件");
+                installButton.Enabled = true;
                 return;
             }
 

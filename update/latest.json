@@ -1,8 +1,8 @@
 {
   "Version": "0.0.1.8",
   "ReleaseDate": "2026-08-21",
-  "Notes": "新增检查更新功能，修复 GitHub TLS、UTF-8 清单解析，并优化微软风格的更新提示界面。",
+  "Notes": "新增检查更新功能，修复 GitHub TLS、UTF-8 清单解析、下载卡顿和临时路径升级失败问题。",
   "PackageUrl": "https://raw.githubusercontent.com/jia-yawei/Doculint/main/update/DocuLint-0.0.1.8-setup.exe",
   "PackageFileName": "DocuLint-0.0.1.8-setup.exe",
-  "Sha256": "E05CC02D2A9E34FF8A381846DADA6E052F4C897C3981D751F30D02F5B4391ECF"
+  "Sha256": "CEA6A7E4BA2FD7A8A0CD08030BE0D85D9FBE4D814CB64C585EE0C3D71DC9ABD3"
 }
