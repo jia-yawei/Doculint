@@ -139,6 +139,15 @@ namespace DocuLint
 
         internal static string DownloadPackage(PluginUpdateManifest manifest, string targetFolder, out string error)
         {
+            return DownloadPackage(manifest, targetFolder, null, out error);
+        }
+
+        internal static string DownloadPackage(
+            PluginUpdateManifest manifest,
+            string targetFolder,
+            Action<long, long> progress,
+            out string error)
+        {
             error = string.Empty;
             if (manifest == null || string.IsNullOrWhiteSpace(manifest.PackageUrl))
             {
@@ -154,8 +163,21 @@ namespace DocuLint
                     : manifest.PackageFileName;
                 string target = Path.Combine(targetFolder, string.IsNullOrWhiteSpace(name) ? "DocuLint-update.vsto" : name);
                 using (WebClient client = CreateClient())
+                using (Stream input = client.OpenRead(manifest.PackageUrl))
+                using (FileStream output = File.Create(target))
                 {
-                    client.DownloadFile(manifest.PackageUrl, target);
+                    long totalBytes = -1;
+                    long.TryParse(client.ResponseHeaders[HttpResponseHeader.ContentLength], out totalBytes);
+                    long receivedBytes = 0;
+                    byte[] buffer = new byte[64 * 1024];
+                    int read;
+                    progress?.Invoke(0, totalBytes);
+                    while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        output.Write(buffer, 0, read);
+                        receivedBytes += read;
+                        progress?.Invoke(receivedBytes, totalBytes);
+                    }
                 }
 
                 if (!VerifySha256(target, manifest.Sha256))

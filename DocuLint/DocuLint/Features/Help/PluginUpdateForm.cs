@@ -15,6 +15,7 @@ namespace DocuLint
         private readonly Label statusHeadingLabel;
         private readonly Label versionSummaryLabel;
         private readonly Label statusLabel;
+        private readonly ProgressBar updateProgressBar;
         private readonly Button installButton;
         private readonly Button checkButton;
         private readonly Button cancelButton;
@@ -102,12 +103,13 @@ namespace DocuLint
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 3,
+                RowCount = 4,
                 BackColor = Color.Transparent,
             };
             statusLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             statusLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             statusLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            statusLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             statusHeadingLabel = new Label
             {
                 Text = automaticCheck ? "正在检查更新" : "检查更新",
@@ -132,9 +134,21 @@ namespace DocuLint
                 ForeColor = Color.FromArgb(75, 82, 95),
                 Padding = new Padding(0, 2, 0, 0)
             };
+            updateProgressBar = new ProgressBar
+            {
+                Dock = DockStyle.Fill,
+                Height = 12,
+                Minimum = 0,
+                Maximum = 100,
+                Value = 0,
+                Style = ProgressBarStyle.Continuous,
+                Visible = false,
+                Margin = new Padding(0, 8, 0, 0)
+            };
             statusLayout.Controls.Add(statusHeadingLabel, 0, 0);
             statusLayout.Controls.Add(versionSummaryLabel, 0, 1);
             statusLayout.Controls.Add(statusLabel, 0, 2);
+            statusLayout.Controls.Add(updateProgressBar, 0, 3);
             statusPanel.Controls.Add(statusLayout);
             layout.Controls.Add(statusPanel, 0, 6);
             layout.SetColumnSpan(statusPanel, 3);
@@ -193,6 +207,7 @@ namespace DocuLint
             SaveSettings();
             latestManifest = null;
             latestSource = null;
+            updateProgressBar.Visible = false;
             statusHeadingLabel.Text = "正在检查更新";
             versionSummaryLabel.Text = "当前版本 " + PluginUpdateService.CurrentVersionText;
             statusLabel.Text = "正在连接 GitHub 和指定文件夹，请稍候...";
@@ -255,13 +270,20 @@ namespace DocuLint
             statusHeadingLabel.Text = "正在下载更新";
             versionSummaryLabel.Text = "最新版本 " + latestManifest.Version;
             statusLabel.Text = "正在下载安装包，请稍候... Word 仍可正常使用。";
+            updateProgressBar.Style = ProgressBarStyle.Continuous;
+            updateProgressBar.Value = 0;
+            updateProgressBar.Visible = true;
 
             Task.Run(() =>
             {
                 string error = string.Empty;
                 string packagePath = latestSource == "指定文件夹"
                     ? PluginUpdateService.ResolvePackagePath(latestManifest, localFolderBox.Text.Trim())
-                    : PluginUpdateService.DownloadPackage(latestManifest, Path.Combine(Path.GetTempPath(), "DocuLint-updates"), out error);
+                    : PluginUpdateService.DownloadPackage(
+                        latestManifest,
+                        Path.Combine(Path.GetTempPath(), "DocuLint-updates"),
+                        ReportDownloadProgress,
+                        out error);
                 return Tuple.Create(packagePath, error);
             }).ContinueWith(task =>
             {
@@ -277,6 +299,7 @@ namespace DocuLint
         private void CompleteInstall(Task<Tuple<string, string>> downloadTask)
         {
             updateInProgress = false;
+            updateProgressBar.Visible = false;
             cancelButton.Enabled = true;
             checkButton.Enabled = true;
 
@@ -313,6 +336,41 @@ namespace DocuLint
             {
                 statusHeadingLabel.Text = "安装更新失败";
                 statusLabel.Text = "启动安装程序失败：" + ex.Message;
+            }
+        }
+
+        private void ReportDownloadProgress(long receivedBytes, long totalBytes)
+        {
+            if (IsDisposed || !IsHandleCreated)
+            {
+                return;
+            }
+
+            try
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    if (IsDisposed)
+                    {
+                        return;
+                    }
+
+                    if (totalBytes <= 0)
+                    {
+                        updateProgressBar.Style = ProgressBarStyle.Marquee;
+                        statusLabel.Text = "正在下载安装包，请稍候...";
+                        return;
+                    }
+
+                    updateProgressBar.Style = ProgressBarStyle.Continuous;
+                    int percent = (int)Math.Min(100L, receivedBytes * 100L / totalBytes);
+                    updateProgressBar.Value = Math.Max(0, percent);
+                    statusLabel.Text = "正在下载安装包... " + percent + "%";
+                }));
+            }
+            catch (InvalidOperationException)
+            {
+                // The form may close while the background download is finishing.
             }
         }
 
