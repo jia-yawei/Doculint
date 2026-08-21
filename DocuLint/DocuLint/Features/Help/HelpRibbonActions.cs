@@ -55,6 +55,22 @@ namespace DocuLint
             }
         }
 
+        private void btnPluginSettings_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                Globals.ThisAddIn?.OpenPluginSettings();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "打开插件配置失败：\r\n" + ex.Message,
+                    "插件配置",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+        }
+
         private void btnHelpVersion_Click(object sender, RibbonControlEventArgs e)
         {
             OpenLocalHtml(GetVersionHistoryPath(), "版本更新记录");

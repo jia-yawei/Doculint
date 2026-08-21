@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using Threading = System.Threading;
 using System.Windows.Forms;
 using Word = Microsoft.Office.Interop.Word;
@@ -80,13 +81,7 @@ namespace DocuLint
             commonPhraseHotKeyWindow = new CommonPhraseHotKeyWindow(this);
             if (!commonPhraseHotKeyWindow.Register())
             {
-                try
-                {
-                    Application.StatusBar = "常用语快捷键注册失败，请检查 Ctrl+Alt+Space 是否被其他程序占用。";
-                }
-                catch
-                {
-                }
+                SetPluginShortcutStatus("部分插件快捷键注册失败，请在插件配置中检查冲突。", true);
             }
             // 初始化文档跳转工具
             documentHostAdapter = new WordDocumentHostAdapter(() => Application);
@@ -342,6 +337,64 @@ namespace DocuLint
             try
             {
                 commonPhrasesPaneControl?.ReloadPhrases();
+            }
+            catch
+            {
+            }
+        }
+
+        internal void OpenPluginSettings()
+        {
+            commonPhraseHotKeyWindow?.Suspend();
+            try
+            {
+                using (PluginSettingsForm form = new PluginSettingsForm(
+                    Properties.Settings.Default.CommonPhraseShortcut,
+                    Properties.Settings.Default.InsertImageCaptionShortcut,
+                    Properties.Settings.Default.InsertTableCaptionShortcut))
+                {
+                    if (form.ShowDialog() != DialogResult.OK)
+                    {
+                        return;
+                    }
+
+                    Properties.Settings.Default.CommonPhraseShortcut = PluginShortcutService.Normalize(form.CommonPhraseShortcut);
+                    Properties.Settings.Default.InsertImageCaptionShortcut = PluginShortcutService.Normalize(form.InsertImageCaptionShortcut);
+                    Properties.Settings.Default.InsertTableCaptionShortcut = PluginShortcutService.Normalize(form.InsertTableCaptionShortcut);
+                    Properties.Settings.Default.Save();
+                }
+            }
+            finally
+            {
+                RefreshPluginShortcuts();
+            }
+        }
+
+        internal void RefreshPluginShortcuts()
+        {
+            if (commonPhraseHotKeyWindow == null)
+            {
+                return;
+            }
+
+            if (!commonPhraseHotKeyWindow.ReRegister())
+            {
+                SetPluginShortcutStatus("部分插件快捷键注册失败，请检查是否与其他程序或插件冲突。", true);
+            }
+            else
+            {
+                SetPluginShortcutStatus("插件快捷键配置已生效。", false);
+            }
+        }
+
+        private void SetPluginShortcutStatus(string message, bool warning)
+        {
+            try
+            {
+                if (Application != null)
+                {
+                    Application.StatusBar = message;
+                }
             }
             catch
             {
@@ -1818,11 +1871,11 @@ namespace DocuLint
         private sealed class CommonPhraseHotKeyWindow : NativeWindow, IDisposable
         {
             private const int WmHotKey = 0x0312;
-            private const uint ModAlt = 0x0001;
-            private const uint ModControl = 0x0002;
-            private const uint ModNoRepeat = 0x4000;
-            private const int HotKeyId = 0x4443;
+            private const int CommonPhraseHotKeyId = 0x4443;
+            private const int ImageCaptionHotKeyId = 0x4444;
+            private const int TableCaptionHotKeyId = 0x4445;
             private readonly ThisAddIn owner;
+            private readonly HashSet<int> registeredIds = new HashSet<int>();
             private bool registered;
 
             internal CommonPhraseHotKeyWindow(ThisAddIn owner)
@@ -1832,32 +1885,78 @@ namespace DocuLint
 
             internal bool Register()
             {
-                if (registered)
-                {
-                    return true;
-                }
-
-                CreateHandle(new CreateParams());
-                registered = RegisterHotKey(
-                    Handle,
-                    HotKeyId,
-                    ModControl | ModAlt | ModNoRepeat,
-                    (uint)Keys.Space);
                 if (!registered)
                 {
-                    ReleaseHandle();
+                    CreateHandle(new CreateParams());
+                    registered = true;
                 }
 
-                return registered;
+                return ReRegister();
+            }
+
+            internal bool ReRegister()
+            {
+                if (Handle == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                foreach (int id in registeredIds.ToArray())
+                {
+                    UnregisterHotKey(Handle, id);
+                }
+
+                registeredIds.Clear();
+                bool success = true;
+                HashSet<string> configured = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                success &= TryRegisterShortcut(
+                    CommonPhraseHotKeyId,
+                    Properties.Settings.Default.CommonPhraseShortcut,
+                    configured);
+                success &= TryRegisterShortcut(
+                    ImageCaptionHotKeyId,
+                    Properties.Settings.Default.InsertImageCaptionShortcut,
+                    configured);
+                success &= TryRegisterShortcut(
+                    TableCaptionHotKeyId,
+                    Properties.Settings.Default.InsertTableCaptionShortcut,
+                    configured);
+                return success;
+            }
+
+            internal void Suspend()
+            {
+                if (Handle == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                foreach (int id in registeredIds.ToArray())
+                {
+                    UnregisterHotKey(Handle, id);
+                }
+
+                registeredIds.Clear();
             }
 
             protected override void WndProc(ref Message message)
             {
-                if (message.Msg == WmHotKey && message.WParam.ToInt32() == HotKeyId)
+                if (message.Msg == WmHotKey && registeredIds.Contains(message.WParam.ToInt32()))
                 {
                     if (owner?.IsWordForeground() == true)
                     {
-                        owner.RequestCommonPhraseSuggestionFromShortcut();
+                        switch (message.WParam.ToInt32())
+                        {
+                            case CommonPhraseHotKeyId:
+                                owner.RequestCommonPhraseSuggestionFromShortcut();
+                                break;
+                            case ImageCaptionHotKeyId:
+                                Ribbon1.ExecuteInsertImageCaption();
+                                break;
+                            case TableCaptionHotKeyId:
+                                Ribbon1.ExecuteInsertTableCaption();
+                                break;
+                        }
                     }
                 }
 
@@ -1868,7 +1967,12 @@ namespace DocuLint
             {
                 if (registered && Handle != IntPtr.Zero)
                 {
-                    UnregisterHotKey(Handle, HotKeyId);
+                    foreach (int id in registeredIds.ToArray())
+                    {
+                        UnregisterHotKey(Handle, id);
+                    }
+
+                    registeredIds.Clear();
                     registered = false;
                 }
 
@@ -1876,6 +1980,34 @@ namespace DocuLint
                 {
                     ReleaseHandle();
                 }
+            }
+
+            private bool TryRegisterShortcut(int id, string value, HashSet<string> configured)
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    return true;
+                }
+
+                string normalized = PluginShortcutService.Normalize(value);
+                if (string.IsNullOrWhiteSpace(normalized)
+                    || !configured.Add(normalized)
+                    || !PluginShortcutService.TryParse(normalized, out PluginShortcutService.ShortcutDefinition definition))
+                {
+                    return false;
+                }
+
+                bool result = RegisterHotKey(
+                    Handle,
+                    id,
+                    definition.Modifiers | PluginShortcutService.ModNoRepeat,
+                    definition.VirtualKey);
+                if (result)
+                {
+                    registeredIds.Add(id);
+                }
+
+                return result;
             }
 
             [System.Runtime.InteropServices.DllImport("user32.dll")]

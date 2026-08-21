@@ -107,6 +107,7 @@ namespace DocuLint
             this.btnHelpVersion = this.Factory.CreateRibbonButton();
             this.btnCheckUpdates = this.Factory.CreateRibbonButton();
             this.btnOpenHelpDocument = this.Factory.CreateRibbonButton();
+            this.btnPluginSettings = this.Factory.CreateRibbonButton();
             this.tab1.SuspendLayout();
             this.groupDocumentManage.SuspendLayout();
             this.group4.SuspendLayout();
@@ -510,7 +511,7 @@ namespace DocuLint
             this.btnCommonPhrases.OfficeImageId = "Paste";
             this.btnCommonPhrases.ScreenTip = "显示常用语";
             this.btnCommonPhrases.ShowImage = true;
-            this.btnCommonPhrases.SuperTip = "打开常用语侧边栏，选择后插入当前光标位置。输入文字后按 Ctrl+Alt+Space 可显示相似常用语候选。";
+            this.btnCommonPhrases.SuperTip = "打开常用语侧边栏，选择后插入当前光标位置；候选补全快捷键可在插件配置中设置。";
             this.btnCommonPhrases.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnCommonPhrases_Click);
             // 
             // btnStartDocumentCheck
@@ -681,6 +682,7 @@ namespace DocuLint
             this.menuHelp.Items.Add(this.btnHelpVersion);
             this.menuHelp.Items.Add(this.btnCheckUpdates);
             this.menuHelp.Items.Add(this.btnOpenHelpDocument);
+            this.menuHelp.Items.Add(this.btnPluginSettings);
             this.menuHelp.Label = "关于";
             this.menuHelp.Name = "menuHelp";
             this.menuHelp.OfficeImageId = "Help";
@@ -708,6 +710,16 @@ namespace DocuLint
             this.btnOpenHelpDocument.OfficeImageId = "Help";
             this.btnOpenHelpDocument.ShowImage = true;
             this.btnOpenHelpDocument.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnOpenHelpDocument_Click);
+            //
+            // btnPluginSettings
+            //
+            this.btnPluginSettings.Label = "插件配置";
+            this.btnPluginSettings.Name = "btnPluginSettings";
+            this.btnPluginSettings.OfficeImageId = "Settings";
+            this.btnPluginSettings.ScreenTip = "插件配置";
+            this.btnPluginSettings.ShowImage = true;
+            this.btnPluginSettings.SuperTip = "配置常用语补全、图片题注和表格题注快捷键。";
+            this.btnPluginSettings.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnPluginSettings_Click);
             //
             // Ribbon1
             //
@@ -805,6 +817,7 @@ namespace DocuLint
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnHelpVersion;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnCheckUpdates;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnOpenHelpDocument;
+        internal Microsoft.Office.Tools.Ribbon.RibbonButton btnPluginSettings;
     }
 
     partial class ThisRibbonCollection

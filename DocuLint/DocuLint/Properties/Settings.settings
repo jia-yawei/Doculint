@@ -10,6 +10,15 @@
     <Setting Name="CommonPhraseLibraryPath" Type="System.String" Scope="User">
       <Value Profile="(Default)" />
     </Setting>
+    <Setting Name="CommonPhraseShortcut" Type="System.String" Scope="User">
+      <Value Profile="(Default)">Ctrl+Alt+Space</Value>
+    </Setting>
+    <Setting Name="InsertImageCaptionShortcut" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
+    <Setting Name="InsertTableCaptionShortcut" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
     <Setting Name="ChapterNumberRepairFormatting" Type="System.String" Scope="User">
       <Value Profile="(Default)" />
     </Setting>

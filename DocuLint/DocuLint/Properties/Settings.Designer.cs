@@ -49,6 +49,42 @@ namespace DocuLint.Properties {
 
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("Ctrl+Alt+Space")]
+        public string CommonPhraseShortcut {
+            get {
+                return ((string)(this["CommonPhraseShortcut"]));
+            }
+            set {
+                this["CommonPhraseShortcut"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string InsertImageCaptionShortcut {
+            get {
+                return ((string)(this["InsertImageCaptionShortcut"]));
+            }
+            set {
+                this["InsertImageCaptionShortcut"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string InsertTableCaptionShortcut {
+            get {
+                return ((string)(this["InsertTableCaptionShortcut"]));
+            }
+            set {
+                this["InsertTableCaptionShortcut"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("")]
         public string ChapterNumberRepairFormatting {
             get {
