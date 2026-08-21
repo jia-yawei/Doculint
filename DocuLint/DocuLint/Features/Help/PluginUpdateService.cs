@@ -53,7 +53,8 @@ namespace DocuLint
 
             try
             {
-                return new JavaScriptSerializer().Deserialize<PluginUpdateManifest>(manifestText);
+                return new JavaScriptSerializer().Deserialize<PluginUpdateManifest>(
+                    manifestText.TrimStart('\uFEFF'));
             }
             catch
             {
@@ -68,7 +69,13 @@ namespace DocuLint
             {
                 using (WebClient client = CreateClient())
                 {
-                    return ReadManifest(client.DownloadString(manifestUrl));
+                    PluginUpdateManifest manifest = ReadManifest(client.DownloadString(manifestUrl));
+                    if (manifest == null)
+                    {
+                        error = "GitHub 更新清单格式无效。";
+                    }
+
+                    return manifest;
                 }
             }
             catch (Exception ex)
@@ -90,7 +97,13 @@ namespace DocuLint
                     return null;
                 }
 
-                return ReadManifest(File.ReadAllText(path, Encoding.UTF8));
+                PluginUpdateManifest manifest = ReadManifest(File.ReadAllText(path, Encoding.UTF8));
+                if (manifest == null)
+                {
+                    error = "更新清单格式无效。";
+                }
+
+                return manifest;
             }
             catch (Exception ex)
             {
@@ -180,6 +193,7 @@ namespace DocuLint
         {
             WebClient client = new WebClient();
             client.Headers[HttpRequestHeader.UserAgent] = "DocuLint-UpdateClient/1.0";
+            client.Encoding = Encoding.UTF8;
             return client;
         }
     }
