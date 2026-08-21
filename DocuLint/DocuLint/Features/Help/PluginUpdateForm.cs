@@ -34,7 +34,7 @@ namespace DocuLint
                 RowCount = 8,
                 Padding = new Padding(16)
             };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112F));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 148F));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92F));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -42,8 +42,8 @@ namespace DocuLint
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             Label title = new Label
@@ -69,7 +69,7 @@ namespace DocuLint
             };
             layout.Controls.Add(githubSourceLabel, 1, 2);
 
-            layout.Controls.Add(new Label { Text = "内网更新文件夹", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 3);
+            layout.Controls.Add(new Label { Text = "指定文件夹", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 3);
             localFolderBox = new TextBox { Dock = DockStyle.Fill, Text = GetLocalFolder() };
             layout.Controls.Add(localFolderBox, 1, 3);
             Button browseButton = new Button { Text = "选择...", AutoSize = true, Dock = DockStyle.Fill };
@@ -86,9 +86,10 @@ namespace DocuLint
 
             statusLabel = new Label
             {
-                Text = automaticCheck ? "正在检查更新..." : "GitHub 更新源已内置，也可以配置内网更新文件夹。",
+                Text = automaticCheck ? "正在检查更新..." : "GitHub 更新源已内置，也可以指定文件夹。",
                 AutoSize = false,
                 Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.TopLeft,
                 ForeColor = Color.FromArgb(75, 82, 95),
                 Padding = new Padding(0, 8, 0, 8)
             };
@@ -149,7 +150,7 @@ namespace DocuLint
             SaveSettings();
             latestManifest = null;
             latestSource = null;
-            statusLabel.Text = "正在检查 GitHub 和内网更新源...";
+            statusLabel.Text = "正在检查 GitHub 和指定文件夹...";
             Application.DoEvents();
 
             string githubError = string.Empty;
@@ -196,7 +197,7 @@ namespace DocuLint
             }
 
             string error = string.Empty;
-            string packagePath = latestSource == "内网"
+            string packagePath = latestSource == "指定文件夹"
                 ? PluginUpdateService.ResolvePackagePath(latestManifest, localFolderBox.Text.Trim())
                 : PluginUpdateService.DownloadPackage(latestManifest, Path.Combine(Path.GetTempPath(), "DocuLint-updates"), out error);
             if (string.IsNullOrWhiteSpace(packagePath))
@@ -222,9 +223,9 @@ namespace DocuLint
         private static PluginUpdateManifest SelectNewerManifest(PluginUpdateManifest first, PluginUpdateManifest second, out string source)
         {
             source = null;
-            if (first == null) { source = second == null ? null : "内网"; return second; }
+            if (first == null) { source = second == null ? null : "指定文件夹"; return second; }
             if (second == null) { source = "GitHub"; return first; }
-            if (second.ParsedVersion > first.ParsedVersion) { source = "内网"; return second; }
+            if (second.ParsedVersion > first.ParsedVersion) { source = "指定文件夹"; return second; }
             source = "GitHub";
             return first;
         }
