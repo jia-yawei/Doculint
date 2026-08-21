@@ -11,7 +11,12 @@ namespace DocuLint
         private readonly TextBox localFolderBox;
         private readonly CheckBox autoCheckBox;
         private readonly CheckBox skipVersionBox;
+        private readonly Label statusHeadingLabel;
+        private readonly Label versionSummaryLabel;
         private readonly Label statusLabel;
+        private readonly Button installButton;
+        private readonly Button checkButton;
+        private readonly Button cancelButton;
         private PluginUpdateManifest latestManifest;
         private string latestSource;
 
@@ -25,7 +30,7 @@ namespace DocuLint
             ShowInTaskbar = false;
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = new Font("Microsoft YaHei UI", 9F);
-            ClientSize = new Size(640, 360);
+            ClientSize = new Size(640, 420);
 
             TableLayoutPanel layout = new TableLayoutPanel
             {
@@ -84,31 +89,67 @@ namespace DocuLint
             layout.Controls.Add(skipVersionBox, 0, 5);
             layout.SetColumnSpan(skipVersionBox, 3);
 
+            Panel statusPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = Color.FromArgb(247, 249, 251),
+                Padding = new Padding(14, 10, 14, 10),
+            };
+            TableLayoutPanel statusLayout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 1,
+                RowCount = 3,
+                BackColor = Color.Transparent,
+            };
+            statusLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            statusLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            statusLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            statusHeadingLabel = new Label
+            {
+                Text = automaticCheck ? "正在检查更新" : "检查更新",
+                AutoSize = true,
+                Font = new Font(Font.FontFamily, 12F, FontStyle.Bold),
+                ForeColor = Color.FromArgb(31, 41, 55),
+                Margin = new Padding(0, 0, 0, 6)
+            };
+            versionSummaryLabel = new Label
+            {
+                Text = "当前版本 " + PluginUpdateService.CurrentVersionText,
+                AutoSize = true,
+                ForeColor = Color.FromArgb(75, 82, 95),
+                Margin = new Padding(0, 0, 0, 6)
+            };
             statusLabel = new Label
             {
-                Text = automaticCheck ? "正在检查更新..." : "GitHub 更新源已内置，也可以指定文件夹。",
+                Text = automaticCheck ? "正在连接更新源，请稍候..." : "点击“检查更新”获取最新版本信息。",
                 AutoSize = false,
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.TopLeft,
                 ForeColor = Color.FromArgb(75, 82, 95),
-                Padding = new Padding(0, 8, 0, 8)
+                Padding = new Padding(0, 2, 0, 0)
             };
-            layout.Controls.Add(statusLabel, 0, 6);
-            layout.SetColumnSpan(statusLabel, 3);
+            statusLayout.Controls.Add(statusHeadingLabel, 0, 0);
+            statusLayout.Controls.Add(versionSummaryLabel, 0, 1);
+            statusLayout.Controls.Add(statusLabel, 0, 2);
+            statusPanel.Controls.Add(statusLayout);
+            layout.Controls.Add(statusPanel, 0, 6);
+            layout.SetColumnSpan(statusPanel, 3);
 
             FlowLayoutPanel buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.RightToLeft, WrapContents = false };
-            Button installButton = new Button { Text = "安装更新", AutoSize = true, Enabled = false, MinimumSize = new Size(100, 30) };
+            installButton = new Button { Text = automaticCheck ? "立即更新" : "安装更新", AutoSize = true, Enabled = false, MinimumSize = new Size(100, 30) };
             installButton.Click += (_, __) => InstallUpdate();
-            Button checkButton = new Button { Text = "检查更新", AutoSize = true, MinimumSize = new Size(100, 30) };
+            checkButton = new Button { Text = "检查更新", AutoSize = true, MinimumSize = new Size(100, 30), Visible = !automaticCheck };
             checkButton.Click += (_, __) => CheckForUpdates();
-            Button cancelButton = new Button { Text = "关闭", AutoSize = true, MinimumSize = new Size(76, 30), DialogResult = DialogResult.Cancel };
+            cancelButton = new Button { Text = automaticCheck ? "稍后" : "关闭", AutoSize = true, MinimumSize = new Size(76, 30), DialogResult = DialogResult.Cancel };
             buttons.Controls.Add(installButton);
             buttons.Controls.Add(checkButton);
             buttons.Controls.Add(cancelButton);
             layout.Controls.Add(buttons, 0, 7);
             layout.SetColumnSpan(buttons, 3);
             Controls.Add(layout);
-            AcceptButton = checkButton;
+            AcceptButton = automaticCheck ? installButton : checkButton;
             CancelButton = cancelButton;
 
             installButton.Tag = "install";
@@ -150,7 +191,10 @@ namespace DocuLint
             SaveSettings();
             latestManifest = null;
             latestSource = null;
-            statusLabel.Text = "正在检查 GitHub 和指定文件夹...";
+            statusHeadingLabel.Text = "正在检查更新";
+            versionSummaryLabel.Text = "当前版本 " + PluginUpdateService.CurrentVersionText;
+            statusLabel.Text = "正在连接 GitHub 和指定文件夹，请稍候...";
+            installButton.Enabled = false;
             Application.DoEvents();
 
             string githubError = string.Empty;
@@ -171,22 +215,28 @@ namespace DocuLint
                 string details = string.IsNullOrWhiteSpace(localFolderBox.Text)
                     ? githubError
                     : (githubError + (string.IsNullOrWhiteSpace(localError) ? string.Empty : "；" + localError));
+                statusHeadingLabel.Text = "检查更新失败";
+                versionSummaryLabel.Text = "当前版本 " + PluginUpdateService.CurrentVersionText;
                 statusLabel.Text = "未找到可用更新源。" + (string.IsNullOrWhiteSpace(details) ? string.Empty : "\r\n" + details);
                 return;
             }
 
             latestManifest = SelectNewerManifest(github, local, out latestSource);
-            Button installButton = Tag as Button;
             if (latestManifest == null || latestManifest.ParsedVersion <= PluginUpdateService.CurrentVersion)
             {
+                statusHeadingLabel.Text = "无需更新";
+                versionSummaryLabel.Text = "当前版本 " + PluginUpdateService.CurrentVersionText;
                 statusLabel.Text = "当前已是最新版本。";
-                if (installButton != null) installButton.Enabled = false;
+                installButton.Enabled = false;
                 return;
             }
 
-            statusLabel.Text = "发现新版本 " + latestManifest.Version + "（来源：" + latestSource + "）\r\n" + (latestManifest.Notes ?? string.Empty);
+            statusHeadingLabel.Text = "发现新版本";
+            versionSummaryLabel.Text = "当前版本 " + PluginUpdateService.CurrentVersionText
+                + "    最新版本 " + latestManifest.Version;
+            statusLabel.Text = "来源：" + latestSource + "\r\n" + (latestManifest.Notes ?? "暂无更新说明。");
             skipVersionBox.Visible = true;
-            if (installButton != null) installButton.Enabled = true;
+            installButton.Enabled = true;
         }
 
         private void InstallUpdate()
@@ -202,6 +252,7 @@ namespace DocuLint
                 : PluginUpdateService.DownloadPackage(latestManifest, Path.Combine(Path.GetTempPath(), "DocuLint-updates"), out error);
             if (string.IsNullOrWhiteSpace(packagePath))
             {
+                statusHeadingLabel.Text = "安装更新失败";
                 statusLabel.Text = "无法取得安装包：" + (error ?? "未找到文件");
                 return;
             }
@@ -210,12 +261,14 @@ namespace DocuLint
             try
             {
                 Process.Start(new ProcessStartInfo { FileName = packagePath, UseShellExecute = true });
-                statusLabel.Text = "安装程序已启动。安装完成后请重新打开 Word。";
+                statusHeadingLabel.Text = "安装程序已启动";
+                statusLabel.Text = "安装完成后请重新打开 Word。";
                 DialogResult = DialogResult.OK;
                 Close();
             }
             catch (Exception ex)
             {
+                statusHeadingLabel.Text = "安装更新失败";
                 statusLabel.Text = "启动安装程序失败：" + ex.Message;
             }
         }
