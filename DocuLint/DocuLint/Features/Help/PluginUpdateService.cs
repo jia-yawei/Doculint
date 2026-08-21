@@ -31,6 +31,13 @@ namespace DocuLint
             "https://raw.githubusercontent.com/jia-yawei/Doculint/main/update/latest.json";
         internal const string ManifestFileName = "latest.json";
 
+        static PluginUpdateService()
+        {
+            // GitHub requires TLS 1.2 or newer. Explicitly select TLS 1.2 for
+            // .NET Framework installations whose system default is obsolete.
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+        }
+
         internal static string CurrentVersionText =>
             typeof(PluginUpdateService).Assembly.GetName().Version?.ToString() ?? "0.0.0.0";
 

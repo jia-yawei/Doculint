@@ -1,8 +1,8 @@
 {
   "Version": "0.0.1.8",
   "ReleaseDate": "2026-08-21",
-  "Notes": "新增检查更新功能，并修复检查更新窗口的布局显示问题。",
+  "Notes": "新增检查更新功能，修复 GitHub TLS 连接和检查更新窗口布局问题。",
   "PackageUrl": "https://raw.githubusercontent.com/jia-yawei/Doculint/main/update/DocuLint-0.0.1.8-setup.exe",
   "PackageFileName": "DocuLint-0.0.1.8-setup.exe",
-  "Sha256": "1CA88DBACB7B0239541EE3ABC54481FA07D5A43E89B357BE1474FB82542AE66E"
+  "Sha256": "35B6B884A2F5180CD052BE45F41523EB975FA33C7E65A4AD00C878FD5D662D4D"
 }
