@@ -13,6 +13,9 @@ namespace DocuLint
     // Word插件主程序类
     public partial class ThisAddIn
     {
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
         // 右侧统一导航面板的界面控件
         private NavigationPaneControl navigationPaneControl;
         // Word右侧自定义任务面板
@@ -21,6 +24,7 @@ namespace DocuLint
         private CommonPhrasesPaneControl commonPhrasesPaneControl;
         private CustomTaskPane commonPhrasesTaskPane;
         private CommonPhraseSuggestionForm commonPhraseSuggestionForm;
+        private CommonPhraseHotKeyWindow commonPhraseHotKeyWindow;
         private Threading.SynchronizationContext uiSynchronizationContext;
         // 需求追踪控制台界面控件
         private RequirementTrackingConsoleControl requirementTrackingConsoleControl;
@@ -73,6 +77,17 @@ namespace DocuLint
         {
             uiSynchronizationContext = Threading.SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
             Ribbon1.EnableCommonPhraseShortcutHook();
+            commonPhraseHotKeyWindow = new CommonPhraseHotKeyWindow(this);
+            if (!commonPhraseHotKeyWindow.Register())
+            {
+                try
+                {
+                    Application.StatusBar = "常用语快捷键注册失败，请检查 Ctrl+Alt+Space 是否被其他程序占用。";
+                }
+                catch
+                {
+                }
+            }
             // 初始化文档跳转工具
             documentHostAdapter = new WordDocumentHostAdapter(() => Application);
             documentBasicInfoStore = new DocumentBasicInfoStore();
@@ -196,6 +211,8 @@ namespace DocuLint
             RemoveTaskPane(ref documentCheckResultTaskPane, ref documentCheckResultPaneControl);
             DisposeRequirementQuickAddPopup();
             HideCommonPhraseSuggestion();
+            commonPhraseHotKeyWindow?.Dispose();
+            commonPhraseHotKeyWindow = null;
             Ribbon1.DisableCommonPhraseShortcutHook();
             RestoreWordSelectionFloaties();
         }
@@ -339,6 +356,19 @@ namespace DocuLint
             }
 
             uiSynchronizationContext.Post(_ => ShowCommonPhraseSuggestions(), null);
+        }
+
+        private bool IsWordForeground()
+        {
+            try
+            {
+                Word.Window activeWindow = Application?.ActiveWindow;
+                return activeWindow != null && new IntPtr(activeWindow.Hwnd) == GetForegroundWindow();
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private void ShowCommonPhraseSuggestions()
@@ -1771,6 +1801,76 @@ namespace DocuLint
                     }
                 }
             }
+        }
+
+        private sealed class CommonPhraseHotKeyWindow : NativeWindow, IDisposable
+        {
+            private const int WmHotKey = 0x0312;
+            private const uint ModAlt = 0x0001;
+            private const uint ModControl = 0x0002;
+            private const uint ModNoRepeat = 0x4000;
+            private const int HotKeyId = 0x4443;
+            private readonly ThisAddIn owner;
+            private bool registered;
+
+            internal CommonPhraseHotKeyWindow(ThisAddIn owner)
+            {
+                this.owner = owner;
+            }
+
+            internal bool Register()
+            {
+                if (registered)
+                {
+                    return true;
+                }
+
+                CreateHandle(new CreateParams());
+                registered = RegisterHotKey(
+                    Handle,
+                    HotKeyId,
+                    ModControl | ModAlt | ModNoRepeat,
+                    (uint)Keys.Space);
+                if (!registered)
+                {
+                    ReleaseHandle();
+                }
+
+                return registered;
+            }
+
+            protected override void WndProc(ref Message message)
+            {
+                if (message.Msg == WmHotKey && message.WParam.ToInt32() == HotKeyId)
+                {
+                    if (owner?.IsWordForeground() == true)
+                    {
+                        owner.RequestCommonPhraseSuggestionFromShortcut();
+                    }
+                }
+
+                base.WndProc(ref message);
+            }
+
+            public void Dispose()
+            {
+                if (registered && Handle != IntPtr.Zero)
+                {
+                    UnregisterHotKey(Handle, HotKeyId);
+                    registered = false;
+                }
+
+                if (Handle != IntPtr.Zero)
+                {
+                    ReleaseHandle();
+                }
+            }
+
+            [System.Runtime.InteropServices.DllImport("user32.dll")]
+            private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint modifiers, uint virtualKey);
+
+            [System.Runtime.InteropServices.DllImport("user32.dll")]
+            private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
         }
 
         private sealed class WindowHandle : IWin32Window

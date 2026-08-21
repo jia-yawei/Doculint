@@ -57,12 +57,6 @@ namespace DocuLint
         private static extern bool IsIconic(IntPtr hWnd);
 
         [DllImport("user32.dll")]
-        private static extern IntPtr GetForegroundWindow();
-
-        [DllImport("user32.dll")]
-        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-
-        [DllImport("user32.dll")]
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
         [DllImport("user32.dll")]
@@ -86,7 +80,6 @@ namespace DocuLint
         private const int WmSysKeyDown = 0x0104;
         private const int VkEscape = 0x1B;
         private const int VkA = 0x41;
-        private const int VkSpace = 0x20;
         private const int VkControl = 0x11;
         private const int VkMenu = 0x12;
 
@@ -1895,14 +1888,6 @@ namespace DocuLint
                 {
                     Globals.ThisAddIn?.AddSelectedTextToRequirementExtraction();
                 }
-                else if (keyCode == VkSpace
-                    && IsKeyDown(VkControl)
-                    && IsKeyDown(VkMenu)
-                    && IsForegroundWordProcess())
-                {
-                    Globals.ThisAddIn?.RequestCommonPhraseSuggestionFromShortcut();
-                    return (IntPtr)1;
-                }
             }
 
             return CallNextHookEx(keyboardHookHandle, nCode, wParam, lParam);
@@ -1911,20 +1896,6 @@ namespace DocuLint
         private static bool IsKeyDown(int virtualKey)
         {
             return (GetKeyState(virtualKey) & unchecked((short)0x8000)) != 0;
-        }
-
-        private static bool IsForegroundWordProcess()
-        {
-            try
-            {
-                IntPtr foreground = GetForegroundWindow();
-                GetWindowThreadProcessId(foreground, out uint processId);
-                return processId == (uint)Process.GetCurrentProcess().Id;
-            }
-            catch
-            {
-                return false;
-            }
         }
 
         private static void EnsureStyleDefinitionsInitialized()
