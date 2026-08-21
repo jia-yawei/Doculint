@@ -60,7 +60,7 @@ https://raw.githubusercontent.com/jia-yawei/Doculint/main/update/latest.json
 
 ```json
 {
-  "Version": "0.0.1.8",
+  "Version": "0.0.1.7",
   "ReleaseDate": "2026-08-21",
   "Notes": "修复问题，优化功能",
   "PackageUrl": "https://example.com/DocuLint.vsto",

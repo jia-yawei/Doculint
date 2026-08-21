@@ -1,8 +1,8 @@
 {
-  "Version": "0.0.1.8",
+  "Version": "0.0.1.7",
   "ReleaseDate": "2026-08-21",
-  "Notes": "新增检查更新功能，修复 GitHub TLS、UTF-8 清单解析、下载卡顿和临时路径升级失败问题，并增加下载进度显示。",
-  "PackageUrl": "https://raw.githubusercontent.com/jia-yawei/Doculint/main/update/DocuLint-0.0.1.8-setup.exe",
-  "PackageFileName": "DocuLint-0.0.1.8-setup.exe",
-  "Sha256": "C5A7551749F11354F2B42341ADCFA5712FA51B16A49F78F542BD04AFB3EBDEED"
+  "Notes": "修复更新下载与安装问题，增加下载进度显示，并优化更新源选择。",
+  "PackageUrl": "https://raw.githubusercontent.com/jia-yawei/Doculint/main/update/DocuLint-0.0.1.7-setup.exe",
+  "PackageFileName": "DocuLint-0.0.1.7-setup.exe",
+  "Sha256": "13D4B0CBEAC174AAD8D42753B03849E060014B49024A919A2017A0CF1BD50CAD"
 }

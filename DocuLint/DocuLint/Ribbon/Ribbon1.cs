@@ -8,7 +8,6 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Threading;
 using System.Windows.Forms;
 using Word = Microsoft.Office.Interop.Word;
 
@@ -259,7 +258,6 @@ namespace DocuLint
 
             try
             {
-                updateUiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
                 RegisterInstance();
                 UpdateHelpVersionLabel();
                 InitializeOutlineLevelDropDown();

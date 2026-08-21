@@ -10,8 +10,6 @@ namespace DocuLint
     internal sealed class PluginUpdateForm : Form
     {
         private readonly TextBox localFolderBox;
-        private readonly CheckBox autoCheckBox;
-        private readonly CheckBox skipVersionBox;
         private readonly Label statusHeadingLabel;
         private readonly Label versionSummaryLabel;
         private readonly Label statusLabel;
@@ -23,7 +21,7 @@ namespace DocuLint
         private PluginUpdateManifest latestManifest;
         private string latestSource;
 
-        internal PluginUpdateForm(bool automaticCheck = false)
+        internal PluginUpdateForm()
         {
             Text = "检查更新";
             StartPosition = FormStartPosition.CenterScreen;
@@ -39,13 +37,12 @@ namespace DocuLint
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 3,
-                RowCount = 8,
+                RowCount = 7,
                 Padding = new Padding(16)
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 148F));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92F));
-            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -84,14 +81,6 @@ namespace DocuLint
             browseButton.Click += (_, __) => BrowseLocalFolder();
             layout.Controls.Add(browseButton, 2, 3);
 
-            autoCheckBox = new CheckBox { Text = "启动时自动检查 GitHub 更新", AutoSize = true, Checked = GetAutoCheck(), Margin = new Padding(0, 8, 0, 4) };
-            layout.Controls.Add(autoCheckBox, 0, 4);
-            layout.SetColumnSpan(autoCheckBox, 3);
-
-            skipVersionBox = new CheckBox { Text = "找到新版本时不再提示该版本", AutoSize = true, Visible = false };
-            layout.Controls.Add(skipVersionBox, 0, 5);
-            layout.SetColumnSpan(skipVersionBox, 3);
-
             Panel statusPanel = new Panel
             {
                 Dock = DockStyle.Fill,
@@ -112,7 +101,7 @@ namespace DocuLint
             statusLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             statusHeadingLabel = new Label
             {
-                Text = automaticCheck ? "正在检查更新" : "检查更新",
+                Text = "检查更新",
                 AutoSize = true,
                 Font = new Font(Font.FontFamily, 12F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(31, 41, 55),
@@ -127,7 +116,7 @@ namespace DocuLint
             };
             statusLabel = new Label
             {
-                Text = automaticCheck ? "正在连接更新源，请稍候..." : "点击“检查更新”获取最新版本信息。",
+                Text = "点击“检查更新”获取最新版本信息。",
                 AutoSize = false,
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.TopLeft,
@@ -150,41 +139,29 @@ namespace DocuLint
             statusLayout.Controls.Add(statusLabel, 0, 2);
             statusLayout.Controls.Add(updateProgressBar, 0, 3);
             statusPanel.Controls.Add(statusLayout);
-            layout.Controls.Add(statusPanel, 0, 6);
+            layout.Controls.Add(statusPanel, 0, 4);
             layout.SetColumnSpan(statusPanel, 3);
 
             FlowLayoutPanel buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.RightToLeft, WrapContents = false };
-            installButton = new Button { Text = automaticCheck ? "立即更新" : "安装更新", AutoSize = true, Enabled = false, MinimumSize = new Size(100, 30) };
+            installButton = new Button { Text = "安装更新", AutoSize = true, Enabled = false, MinimumSize = new Size(100, 30) };
             installButton.Click += (_, __) => InstallUpdate();
-            checkButton = new Button { Text = "检查更新", AutoSize = true, MinimumSize = new Size(100, 30), Visible = !automaticCheck };
+            checkButton = new Button { Text = "检查更新", AutoSize = true, MinimumSize = new Size(100, 30) };
             checkButton.Click += (_, __) => CheckForUpdates();
-            cancelButton = new Button { Text = automaticCheck ? "稍后" : "关闭", AutoSize = true, MinimumSize = new Size(76, 30), DialogResult = DialogResult.Cancel };
+            cancelButton = new Button { Text = "关闭", AutoSize = true, MinimumSize = new Size(76, 30), DialogResult = DialogResult.Cancel };
             buttons.Controls.Add(installButton);
             buttons.Controls.Add(checkButton);
             buttons.Controls.Add(cancelButton);
-            layout.Controls.Add(buttons, 0, 7);
+            layout.Controls.Add(buttons, 0, 6);
             layout.SetColumnSpan(buttons, 3);
             Controls.Add(layout);
-            AcceptButton = automaticCheck ? installButton : checkButton;
+            AcceptButton = checkButton;
             CancelButton = cancelButton;
 
             installButton.Tag = "install";
             Tag = installButton;
-            FormClosing += (_, __) =>
-            {
-                if (skipVersionBox.Checked && latestManifest != null)
-                {
-                    Properties.Settings.Default.UpdateSkippedVersion = latestManifest.Version ?? string.Empty;
-                    Properties.Settings.Default.Save();
-                }
-            };
             Shown += (_, __) =>
             {
                 SaveSettings();
-                if (automaticCheck)
-                {
-                    BeginInvoke(new Action(CheckForUpdates));
-                }
             };
         }
 
@@ -210,35 +187,36 @@ namespace DocuLint
             updateProgressBar.Visible = false;
             statusHeadingLabel.Text = "正在检查更新";
             versionSummaryLabel.Text = "当前版本 " + PluginUpdateService.CurrentVersionText;
-            statusLabel.Text = "正在连接 GitHub 和指定文件夹，请稍候...";
+            statusLabel.Text = string.IsNullOrWhiteSpace(localFolderBox.Text)
+                ? "正在连接 GitHub，请稍候..."
+                : "正在读取指定文件夹，请稍候...";
             installButton.Enabled = false;
             Application.DoEvents();
 
-            string githubError = string.Empty;
             string localError = string.Empty;
-            PluginUpdateManifest github = null;
-            github = PluginUpdateService.LoadFromGitHub(
-                PluginUpdateService.DefaultGitHubManifestUrl,
-                out githubError);
-
-            PluginUpdateManifest local = null;
-            if (!string.IsNullOrWhiteSpace(localFolderBox.Text))
+            PluginUpdateManifest selected = null;
+            if (string.IsNullOrWhiteSpace(localFolderBox.Text))
             {
-                local = PluginUpdateService.LoadFromFolder(localFolderBox.Text.Trim(), out localError);
+                selected = PluginUpdateService.LoadFromGitHub(
+                    PluginUpdateService.DefaultGitHubManifestUrl,
+                    out localError);
+                latestSource = "GitHub";
+            }
+            else
+            {
+                selected = PluginUpdateService.LoadFromFolder(localFolderBox.Text.Trim(), out localError);
+                latestSource = "指定文件夹";
             }
 
-            if (github == null && local == null)
+            if (selected == null)
             {
-                string details = string.IsNullOrWhiteSpace(localFolderBox.Text)
-                    ? githubError
-                    : (githubError + (string.IsNullOrWhiteSpace(localError) ? string.Empty : "；" + localError));
                 statusHeadingLabel.Text = "检查更新失败";
                 versionSummaryLabel.Text = "当前版本 " + PluginUpdateService.CurrentVersionText;
-                statusLabel.Text = "未找到可用更新源。" + (string.IsNullOrWhiteSpace(details) ? string.Empty : "\r\n" + details);
+                statusLabel.Text = "未找到可用更新源。" + (string.IsNullOrWhiteSpace(localError) ? string.Empty : "\r\n" + localError);
                 return;
             }
 
-            latestManifest = SelectNewerManifest(github, local, out latestSource);
+            latestManifest = selected;
             if (latestManifest == null || latestManifest.ParsedVersion <= PluginUpdateService.CurrentVersion)
             {
                 statusHeadingLabel.Text = "无需更新";
@@ -252,7 +230,6 @@ namespace DocuLint
             versionSummaryLabel.Text = "当前版本 " + PluginUpdateService.CurrentVersionText
                 + "    最新版本 " + latestManifest.Version;
             statusLabel.Text = "来源：" + latestSource + "\r\n" + (latestManifest.Notes ?? "暂无更新说明。");
-            skipVersionBox.Visible = true;
             installButton.Enabled = true;
         }
 
@@ -374,24 +351,12 @@ namespace DocuLint
             }
         }
 
-        private static PluginUpdateManifest SelectNewerManifest(PluginUpdateManifest first, PluginUpdateManifest second, out string source)
-        {
-            source = null;
-            if (first == null) { source = second == null ? null : "指定文件夹"; return second; }
-            if (second == null) { source = "GitHub"; return first; }
-            if (second.ParsedVersion > first.ParsedVersion) { source = "指定文件夹"; return second; }
-            source = "GitHub";
-            return first;
-        }
-
         private void SaveSettings()
         {
             Properties.Settings.Default.UpdateLocalFolder = localFolderBox.Text.Trim();
-            Properties.Settings.Default.UpdateAutoCheck = autoCheckBox.Checked;
             Properties.Settings.Default.Save();
         }
 
         private static string GetLocalFolder() => Properties.Settings.Default.UpdateLocalFolder ?? string.Empty;
-        private static bool GetAutoCheck() => Properties.Settings.Default.UpdateAutoCheck;
     }
 }

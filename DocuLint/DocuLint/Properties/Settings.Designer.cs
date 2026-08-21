@@ -67,21 +67,5 @@ namespace DocuLint.Properties {
             set { this["UpdateLocalFolder"] = value; }
         }
 
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("")]
-        public string UpdateSkippedVersion {
-            get { return ((string)(this["UpdateSkippedVersion"])); }
-            set { this["UpdateSkippedVersion"] = value; }
-        }
-
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("True")]
-        public bool UpdateAutoCheck {
-            get { return ((bool)(this["UpdateAutoCheck"])); }
-            set { this["UpdateAutoCheck"] = value; }
-        }
-
     }
 }

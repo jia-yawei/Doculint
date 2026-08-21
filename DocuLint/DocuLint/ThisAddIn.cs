@@ -945,13 +945,6 @@ namespace DocuLint
         {
             ribbonWarmupTimer?.Stop();
             WarmupRibbonDuringStartup();
-            try
-            {
-                Globals.Ribbons.Ribbon1.CheckUpdatesAutomatically();
-            }
-            catch
-            {
-            }
         }
 
         private static void WarmupRibbonDuringStartup()
