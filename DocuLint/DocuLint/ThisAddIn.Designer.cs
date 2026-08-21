@@ -226,6 +226,7 @@ namespace DocuLint {
     /// 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
     [global::System.CodeDom.Compiler.GeneratedCodeAttribute("Microsoft.VisualStudio.Tools.Office.ProgrammingModel.dll", "18.0.0.0")]
+    [global::System.ComponentModel.DesignerCategoryAttribute("Code")]
     internal sealed partial class ThisRibbonCollection : Microsoft.Office.Tools.Ribbon.RibbonCollectionBase {
         
         /// 

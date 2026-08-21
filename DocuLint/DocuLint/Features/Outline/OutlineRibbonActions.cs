@@ -317,17 +317,26 @@ namespace DocuLint
                 int initialCheckedHeadingCount;
                 List<string> styleConflicts;
                 List<string> initialIssues;
+                List<Word.Range> initialHeadingRanges;
                 using (OutlineProgressForm checkForm =
                     new OutlineProgressForm("章节号修复", "正在检查章节号"))
                 {
                     checkForm.Show();
-                    checkForm.ReportProgress(0, 1, "正在检查标题连续性和样式...");
+                    checkForm.ReportProgress(0, 1, "正在定位目录之后的标题...");
+                    initialHeadingRanges = CollectOutlineRangesByFind(
+                        doc,
+                        new HashSet<int>(Enumerable.Range(1, 9)),
+                        scanStart,
+                        doc.Content.End,
+                        (current, total, message) => checkForm.ReportProgress(current, total, message));
+                    checkForm.ReportProgress(0, Math.Max(1, initialHeadingRanges.Count), "正在检查标题连续性和样式...");
                     initialIssues = VerifyChapterNumberContinuity(
                         doc,
                         scanStart,
                         out initialCheckedHeadingCount,
                         out styleConflicts,
-                        (current, total, message) => checkForm.ReportProgress(current, total, message));
+                        (current, total, message) => checkForm.ReportProgress(current, total, message),
+                        initialHeadingRanges);
                 }
                 if (initialCheckedHeadingCount == 0)
                 {
@@ -368,7 +377,15 @@ namespace DocuLint
                             (current, total, message) =>
                             {
                                 progressForm.ReportProgress(current, total, message);
-                            });
+                            },
+                            initialHeadingRanges);
+
+                        ChapterNumberRepairFormattingSettings formatting = GetChapterNumberRepairFormattingSettings();
+                        if (formatting.ApplyFormatting)
+                        {
+                            progressForm.ReportProgress(0, 1, "正在应用标题文字和段落格式...");
+                            ApplyChapterNumberRepairFormatting(doc, scanStart, formatting, initialHeadingRanges);
+                        }
                     }
 
                     app?.ScreenRefresh();
@@ -401,12 +418,71 @@ namespace DocuLint
             }
         }
 
+        private static void ApplyChapterNumberRepairFormatting(
+            Word.Document doc,
+            int scanStart,
+            ChapterNumberRepairFormattingSettings settings,
+            IReadOnlyList<Word.Range> headingRanges = null)
+        {
+            if (doc?.Content == null || settings == null)
+            {
+                return;
+            }
+
+            List<Word.Range> headings = headingRanges == null
+                ? CollectOutlineRangesByFind(
+                    doc,
+                    new HashSet<int>(Enumerable.Range(1, 9)),
+                    Math.Max(doc.Content.Start, scanStart),
+                    doc.Content.End)
+                : headingRanges.ToList();
+            for (int index = 0; index < headings.Count; index++)
+            {
+                ThrowIfOperationCancelled();
+                Word.Range heading = headings[index];
+                Word.Paragraph paragraph = GetHostParagraph(heading);
+                int level = GetParagraphOutlineLevel(paragraph);
+                if (level < 1 || level > 9 || heading == null)
+                {
+                    continue;
+                }
+
+                string fontName = level == 1 ? settings.LevelOneFontName : settings.OtherLevelsFontName;
+                float fontSize = (float)(level == 1 ? settings.LevelOneFontSize : settings.OtherLevelsFontSize);
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(fontName))
+                    {
+                        heading.Font.Name = fontName;
+                        heading.Font.NameFarEast = fontName;
+                    }
+                    heading.Font.Size = fontSize;
+                    heading.Font.Bold = settings.Bold ? 1 : 0;
+
+                    Word.ParagraphFormat format = heading.ParagraphFormat;
+                    format.Alignment = (Word.WdParagraphAlignment)settings.Alignment;
+                    format.LineSpacingRule = settings.LineSpacingRule == 1
+                        ? Word.WdLineSpacing.wdLineSpace1pt5
+                        : settings.LineSpacingRule == 2
+                            ? Word.WdLineSpacing.wdLineSpaceDouble
+                            : Word.WdLineSpacing.wdLineSpaceSingle;
+                    format.SpaceBefore = (float)settings.SpaceBefore;
+                    format.SpaceAfter = (float)settings.SpaceAfter;
+                }
+                catch
+                {
+                    // Skip an individual protected or unsupported paragraph and continue repairing.
+                }
+            }
+        }
+
         private static List<string> VerifyChapterNumberContinuity(
             Word.Document doc,
             int scanStart,
             out int checkedHeadingCount,
             out List<string> styleConflicts,
-            Action<int, int, string> progress = null)
+            Action<int, int, string> progress = null,
+            IReadOnlyList<Word.Range> headingRangesOverride = null)
         {
             checkedHeadingCount = 0;
             styleConflicts = new List<string>();
@@ -416,12 +492,14 @@ namespace DocuLint
             Dictionary<int, Dictionary<string, List<string>>> titlesByLevelAndStyle =
                 new Dictionary<int, Dictionary<string, List<string>>>();
 
-            List<Word.Range> headingRanges = CollectOutlineRangesByFind(
-                doc,
-                levels,
-                scanStart,
-                doc.Content.End,
-                progress)
+            List<Word.Range> headingRanges = (headingRangesOverride == null
+                ? CollectOutlineRangesByFind(
+                    doc,
+                    levels,
+                    scanStart,
+                    doc.Content.End,
+                    progress)
+                : headingRangesOverride.ToList())
                 .OrderBy(item => item.Start)
                 .ToList();
             int headingIndex = 0;
@@ -990,7 +1068,8 @@ namespace DocuLint
             Word.Document doc,
             OutlineListRebuildOptions options,
             int scanStart,
-            Action<int, int, string> progress)
+            Action<int, int, string> progress,
+            IReadOnlyList<Word.Range> headingRangesOverride = null)
         {
             // 校验参数
             if (options == null || options.SelectedLevels == null || options.SelectedLevels.Count == 0)
@@ -1046,7 +1125,8 @@ namespace DocuLint
                     options.ClearManualNumbering,
                     0,
                     ref currentStep,
-                    progress);
+                    progress,
+                    headingRangesOverride);
                 phaseWatch.Stop();
                 result.ScanMilliseconds = phaseWatch.ElapsedMilliseconds;
                 targets = targets.OrderBy(item => item.Start).ToList();
@@ -1246,13 +1326,16 @@ namespace DocuLint
             bool detectManualPrefixes,
             int totalSteps,
             ref int currentStep,
-            Action<int, int, string> progress)
+            Action<int, int, string> progress,
+            IReadOnlyList<Word.Range> headingRangesOverride = null)
         {
             List<OutlineParagraphSnapshot> targets = new List<OutlineParagraphSnapshot>();
             HashSet<int> seenStarts = new HashSet<int>();
 
             progress(0, 0, "正在按大纲级别定位标题...");
-            foreach (Word.Range outlineRange in CollectOutlineRangesByFind(doc, selectedLevels, targetStart, targetEnd))
+            IEnumerable<Word.Range> outlineRanges = headingRangesOverride ??
+                CollectOutlineRangesByFind(doc, selectedLevels, targetStart, targetEnd);
+            foreach (Word.Range outlineRange in outlineRanges)
             {
                 ThrowIfOperationCancelled();
                 TryAddOutlineTarget(

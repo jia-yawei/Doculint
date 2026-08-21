@@ -6,6 +6,20 @@ using System.Windows.Forms;
 
 namespace DocuLint
 {
+    internal sealed class ChapterNumberRepairFormattingSettings
+    {
+        internal bool ApplyFormatting { get; set; } = true;
+        internal string LevelOneFontName { get; set; } = "黑体";
+        internal decimal LevelOneFontSize { get; set; } = 12M;
+        internal string OtherLevelsFontName { get; set; } = "宋体";
+        internal decimal OtherLevelsFontSize { get; set; } = 12M;
+        internal bool Bold { get; set; }
+        internal int Alignment { get; set; } = 0;
+        internal int LineSpacingRule { get; set; } = 0;
+        internal decimal SpaceBefore { get; set; }
+        internal decimal SpaceAfter { get; set; }
+    }
+
     internal sealed class CommonStyleSettingsForm : Form
     {
         private const int MaxCommonStyles = 9;
@@ -18,15 +32,18 @@ namespace DocuLint
         private readonly ListBox selectedStylesListBox;
         private readonly Label countLabel;
         private readonly List<string> selectedStyleNames;
+        private readonly ChapterNumberRepairFormattingSettings formattingSettings;
         private bool loadingStyleLibrary;
         private bool styleLibraryLoaded;
 
         internal CommonStyleSettingsForm(
             Func<Action<int, int>, IEnumerable<string>> styleLibraryLoader,
             IEnumerable<string> configuredStyleNames,
-            IEnumerable<string> loadedStyleNames = null)
+            IEnumerable<string> loadedStyleNames = null,
+            ChapterNumberRepairFormattingSettings configuredFormatting = null)
         {
             this.styleLibraryLoader = styleLibraryLoader;
+            formattingSettings = configuredFormatting ?? new ChapterNumberRepairFormattingSettings();
             selectedStyleNames = (configuredStyleNames ?? Enumerable.Empty<string>())
                 .Select(name => (name ?? string.Empty).Trim())
                 .Where(name => name.Length > 0)
@@ -34,14 +51,30 @@ namespace DocuLint
                 .Take(MaxCommonStyles)
                 .ToList();
 
-            Text = "设置常用样式";
+            Text = "样式管理设置";
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = false;
-            ClientSize = new Size(470, 382);
+            ClientSize = new Size(570, 450);
             Font = new Font("Microsoft YaHei UI", 9F);
+
+            TabControl tabs = new TabControl
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Point(12, 5)
+            };
+            TabPage commonStylesTab = new TabPage("常用样式设置")
+            {
+                Padding = new Padding(3)
+            };
+            TabPage formattingTab = new TabPage("格式设置")
+            {
+                Padding = new Padding(3)
+            };
+            tabs.TabPages.Add(commonStylesTab);
+            tabs.TabPages.Add(formattingTab);
 
             TableLayoutPanel layout = new TableLayoutPanel
             {
@@ -207,7 +240,9 @@ namespace DocuLint
             layout.Controls.Add(addRow, 0, 2);
             layout.Controls.Add(listSection, 0, 3);
             layout.Controls.Add(buttons, 0, 4);
-            Controls.Add(layout);
+            commonStylesTab.Controls.Add(layout);
+            formattingTab.Controls.Add(CreateFormattingPanel());
+            Controls.Add(tabs);
 
             AcceptButton = saveButton;
             CancelButton = cancelButton;
@@ -224,6 +259,103 @@ namespace DocuLint
         }
 
         internal IReadOnlyList<string> SelectedStyleNames => selectedStyleNames;
+
+        internal ChapterNumberRepairFormattingSettings FormattingSettings => formattingSettings;
+
+        private Control CreateFormattingPanel()
+        {
+            TableLayoutPanel panel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 9,
+                Padding = new Padding(14),
+                AutoScroll = true
+            };
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190F));
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            for (int row = 0; row < 9; row++)
+            {
+                panel.RowStyles.Add(new RowStyle(SizeType.Absolute, row == 0 ? 38F : 36F));
+            }
+
+            CheckBox applyFormatting = new CheckBox
+            {
+                Text = "修复章节号后同步应用标题格式",
+                Checked = formattingSettings.ApplyFormatting,
+                Dock = DockStyle.Fill,
+                AutoSize = true
+            };
+            applyFormatting.CheckedChanged += (_, __) => formattingSettings.ApplyFormatting = applyFormatting.Checked;
+            panel.Controls.Add(applyFormatting, 0, 0);
+            panel.SetColumnSpan(applyFormatting, 2);
+
+            ComboBox firstFont = CreateFontSelector(formattingSettings.LevelOneFontName);
+            firstFont.TextChanged += (_, __) => formattingSettings.LevelOneFontName = firstFont.Text.Trim();
+            NumericUpDown firstSize = CreateFontSizeSelector(formattingSettings.LevelOneFontSize);
+            firstSize.ValueChanged += (_, __) => formattingSettings.LevelOneFontSize = firstSize.Value;
+            ComboBox otherFont = CreateFontSelector(formattingSettings.OtherLevelsFontName);
+            otherFont.TextChanged += (_, __) => formattingSettings.OtherLevelsFontName = otherFont.Text.Trim();
+            NumericUpDown otherSize = CreateFontSizeSelector(formattingSettings.OtherLevelsFontSize);
+            otherSize.ValueChanged += (_, __) => formattingSettings.OtherLevelsFontSize = otherSize.Value;
+            CheckBox bold = new CheckBox { Text = "加粗", Checked = formattingSettings.Bold, AutoSize = true, Anchor = AnchorStyles.Left };
+            bold.CheckedChanged += (_, __) => formattingSettings.Bold = bold.Checked;
+            ComboBox alignment = new ComboBox { Dock = DockStyle.Left, Width = 170, DropDownStyle = ComboBoxStyle.DropDownList };
+            alignment.Items.AddRange(new object[] { "左对齐", "居中", "右对齐", "两端对齐" });
+            alignment.SelectedIndex = Math.Max(0, Math.Min(3, formattingSettings.Alignment));
+            alignment.SelectedIndexChanged += (_, __) => formattingSettings.Alignment = alignment.SelectedIndex;
+            ComboBox lineSpacing = new ComboBox { Dock = DockStyle.Left, Width = 170, DropDownStyle = ComboBoxStyle.DropDownList };
+            lineSpacing.Items.AddRange(new object[] { "单倍行距", "1.5 倍行距", "2 倍行距" });
+            lineSpacing.SelectedIndex = Math.Max(0, Math.Min(2, formattingSettings.LineSpacingRule));
+            lineSpacing.SelectedIndexChanged += (_, __) => formattingSettings.LineSpacingRule = lineSpacing.SelectedIndex;
+            NumericUpDown before = CreateSpacingSelector(formattingSettings.SpaceBefore);
+            before.ValueChanged += (_, __) => formattingSettings.SpaceBefore = before.Value;
+            NumericUpDown after = CreateSpacingSelector(formattingSettings.SpaceAfter);
+            after.ValueChanged += (_, __) => formattingSettings.SpaceAfter = after.Value;
+
+            AddFormatRow(panel, 1, "一级标题字体", firstFont);
+            AddFormatRow(panel, 2, "一级标题字号（磅）", firstSize);
+            AddFormatRow(panel, 3, "其他标题字体", otherFont);
+            AddFormatRow(panel, 4, "其他标题字号（磅）", otherSize);
+            AddFormatRow(panel, 5, "标题字形", bold);
+            AddFormatRow(panel, 6, "段落对齐", alignment);
+            AddFormatRow(panel, 7, "行距", lineSpacing);
+            TableLayoutPanel spacingRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3 };
+            spacingRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            spacingRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 105F));
+            spacingRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 105F));
+            spacingRow.Controls.Add(new Label { Text = "段前 / 段后（磅）", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
+            spacingRow.Controls.Add(before, 1, 0);
+            spacingRow.Controls.Add(after, 2, 0);
+            AddFormatRow(panel, 8, "段落间距", spacingRow);
+            return panel;
+        }
+
+        private static void AddFormatRow(TableLayoutPanel panel, int row, string label, Control control)
+        {
+            panel.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 10, 0) }, 0, row);
+            control.Dock = control.Dock == DockStyle.None ? DockStyle.Fill : control.Dock;
+            control.Margin = new Padding(0, 4, 0, 4);
+            panel.Controls.Add(control, 1, row);
+        }
+
+        private static ComboBox CreateFontSelector(string value)
+        {
+            ComboBox selector = new ComboBox { DropDownStyle = ComboBoxStyle.DropDown, Dock = DockStyle.Fill };
+            selector.Items.AddRange(new object[] { "黑体", "宋体", "仿宋", "楷体", "微软雅黑" });
+            selector.Text = string.IsNullOrWhiteSpace(value) ? "宋体" : value;
+            return selector;
+        }
+
+        private static NumericUpDown CreateFontSizeSelector(decimal value)
+        {
+            return new NumericUpDown { Minimum = 5M, Maximum = 72M, DecimalPlaces = 1, Increment = 0.5M, Value = Math.Max(5M, Math.Min(72M, value)), Width = 170, Anchor = AnchorStyles.Left };
+        }
+
+        private static NumericUpDown CreateSpacingSelector(decimal value)
+        {
+            return new NumericUpDown { Minimum = 0M, Maximum = 120M, DecimalPlaces = 1, Increment = 0.5M, Value = Math.Max(0M, Math.Min(120M, value)), Width = 96, Anchor = AnchorStyles.Left };
+        }
 
         private void LoadStyleLibrary()
         {

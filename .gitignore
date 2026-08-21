@@ -56,6 +56,8 @@ DocuLint/DocuLint/resource/*.png
 TestResults/
 *.trx
 test_*.ps1
+node_cache/
+tmp/*
 .codex-session/history/
 .codex-session/session-brief.local.md
 .codex-session/last-read.txt

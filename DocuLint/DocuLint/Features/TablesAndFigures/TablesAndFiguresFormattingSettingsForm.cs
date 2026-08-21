@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -7,6 +8,35 @@ using System.Windows.Forms;
 
 namespace DocuLint
 {
+    internal sealed class DocumentCheckSettings
+    {
+        public bool CheckNonBodyBlankLines { get; set; }
+        public bool CheckCaptionContinuity { get; set; }
+        public bool CheckListContinuity { get; set; }
+        public bool CheckStyleConsistency { get; set; }
+        public bool CheckBrokenReferences { get; set; }
+
+        internal static DocumentCheckSettings CreateDefault()
+        {
+            return new DocumentCheckSettings
+            {
+                CheckListContinuity = true
+            };
+        }
+
+        internal DocumentCheckSettings Clone()
+        {
+            return new DocumentCheckSettings
+            {
+                CheckNonBodyBlankLines = CheckNonBodyBlankLines,
+                CheckCaptionContinuity = CheckCaptionContinuity,
+                CheckListContinuity = CheckListContinuity,
+                CheckStyleConsistency = CheckStyleConsistency,
+                CheckBrokenReferences = CheckBrokenReferences
+            };
+        }
+    }
+
     internal sealed class TablesAndFiguresFormattingSettings
     {
         public TableFormattingOptions TableOptions { get; set; }
@@ -39,18 +69,26 @@ namespace DocuLint
         private readonly NumericUpDown innerBorderNumeric;
         private readonly TextBox phraseLibraryPathTextBox;
         private readonly ListBox phrasePreviewListBox;
+        private readonly CheckBox checkNonBodyBlankLines;
+        private readonly CheckBox checkCaptionContinuity;
+        private readonly CheckBox checkListContinuity;
+        private readonly CheckBox checkStyleConsistency;
+        private readonly CheckBox checkBrokenReferences;
         private string commonPhraseLibraryPath;
 
         public TablesAndFiguresFormattingSettings Settings { get; private set; }
+        internal DocumentCheckSettings DocumentCheckSettings { get; private set; }
 
         internal string CommonPhraseLibraryPath => commonPhraseLibraryPath;
 
         public TablesAndFiguresFormattingSettingsForm(
             TablesAndFiguresFormattingSettings settings,
-            string configuredCommonPhraseLibraryPath)
+            string configuredCommonPhraseLibraryPath,
+            DocumentCheckSettings documentCheckSettings)
         {
             Settings = (settings ?? TablesAndFiguresFormattingSettings.CreateDefault()).Clone();
             commonPhraseLibraryPath = configuredCommonPhraseLibraryPath ?? string.Empty;
+            DocumentCheckSettings = (documentCheckSettings ?? DocumentCheckSettings.CreateDefault()).Clone();
 
             Font = SystemFonts.MessageBoxFont;
             AutoScaleMode = AutoScaleMode.Dpi;
@@ -61,8 +99,8 @@ namespace DocuLint
             MaximizeBox = false;
             MinimizeBox = false;
             BackColor = Color.White;
-            ClientSize = new Size(680, 520);
-            MinimumSize = new Size(680, 520);
+            ClientSize = new Size(760, 560);
+            MinimumSize = new Size(720, 520);
 
             TableFormattingOptions tableOptions = Settings.TableOptions ?? TableFormattingOptions.CreateDefault();
             headerFontTextBox = CreateTextBox(tableOptions.HeaderFontName);
@@ -85,6 +123,11 @@ namespace DocuLint
                 IntegralHeight = false,
                 HorizontalScrollbar = true
             };
+            checkNonBodyBlankLines = CreateCheckBox("章节标题为空", DocumentCheckSettings.CheckNonBodyBlankLines);
+            checkCaptionContinuity = CreateCheckBox("题注连续性", DocumentCheckSettings.CheckCaptionContinuity);
+            checkListContinuity = CreateCheckBox("多级列表连续性", DocumentCheckSettings.CheckListContinuity);
+            checkStyleConsistency = CreateCheckBox("样式一致性", DocumentCheckSettings.CheckStyleConsistency);
+            checkBrokenReferences = CreateCheckBox("未更新域", DocumentCheckSettings.CheckBrokenReferences);
 
             TableLayoutPanel rootLayout = new TableLayoutPanel
             {
@@ -104,6 +147,7 @@ namespace DocuLint
             };
             tabs.TabPages.Add(CreateTableSettingsTab());
             tabs.TabPages.Add(CreateCommonPhrasesTab());
+            tabs.TabPages.Add(CreateDocumentCheckSettingsTab());
 
             Panel buttonPanel = new Panel
             {
@@ -192,22 +236,35 @@ namespace DocuLint
             TableLayoutPanel pathRow = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
-                ColumnCount = 2,
+                ColumnCount = 3,
                 RowCount = 1,
-                Height = 32,
+                Height = 38,
                 Margin = new Padding(0, 0, 0, 12)
             };
             pathRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            pathRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 124F));
+            pathRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            pathRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             Button loadButton = new Button
             {
                 Text = "加载常用语库",
-                Dock = DockStyle.Fill,
+                AutoSize = true,
+                MinimumSize = new Size(126, 32),
+                Anchor = AnchorStyles.Right | AnchorStyles.Top | AnchorStyles.Bottom,
                 Margin = new Padding(8, 0, 0, 0)
             };
             loadButton.Click += (_, __) => SelectPhraseLibrary();
+            Button openButton = new Button
+            {
+                Text = "打开常用语库",
+                AutoSize = true,
+                MinimumSize = new Size(142, 32),
+                Anchor = AnchorStyles.Right | AnchorStyles.Top | AnchorStyles.Bottom,
+                Margin = new Padding(8, 0, 0, 0)
+            };
+            openButton.Click += (_, __) => OpenPhraseLibrary();
             pathRow.Controls.Add(phraseLibraryPathTextBox, 0, 0);
             pathRow.Controls.Add(loadButton, 1, 0);
+            pathRow.Controls.Add(openButton, 2, 0);
             Label previewLabel = new Label
             {
                 Text = "常用语预览",
@@ -219,6 +276,39 @@ namespace DocuLint
             layout.Controls.Add(pathRow, 0, 1);
             layout.Controls.Add(previewLabel, 0, 2);
             layout.Controls.Add(phrasePreviewListBox, 0, 3);
+            page.Controls.Add(layout);
+            return page;
+        }
+
+        private TabPage CreateDocumentCheckSettingsTab()
+        {
+            TabPage page = new TabPage("体检项目设置") { BackColor = Color.White };
+            TableLayoutPanel layout = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                RowCount = 6,
+                Padding = new Padding(20)
+            };
+            for (int index = 0; index < 6; index++)
+            {
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            }
+
+            Label hint = new Label
+            {
+                AutoSize = true,
+                Text = "选择“文档体检”执行的项目。默认检查多级列表连续性。",
+                Margin = new Padding(0, 0, 0, 12)
+            };
+            layout.Controls.Add(hint, 0, 0);
+            layout.Controls.Add(checkNonBodyBlankLines, 0, 1);
+            layout.Controls.Add(checkCaptionContinuity, 0, 2);
+            layout.Controls.Add(checkListContinuity, 0, 3);
+            layout.Controls.Add(checkStyleConsistency, 0, 4);
+            layout.Controls.Add(checkBrokenReferences, 0, 5);
             page.Controls.Add(layout);
             return page;
         }
@@ -306,6 +396,14 @@ namespace DocuLint
                     InnerBorderWidthPoints = (float)innerBorderNumeric.Value
                 }
             };
+            DocumentCheckSettings = new DocumentCheckSettings
+            {
+                CheckNonBodyBlankLines = checkNonBodyBlankLines.Checked,
+                CheckCaptionContinuity = checkCaptionContinuity.Checked,
+                CheckListContinuity = checkListContinuity.Checked,
+                CheckStyleConsistency = checkStyleConsistency.Checked,
+                CheckBrokenReferences = checkBrokenReferences.Checked
+            };
 
             DialogResult = DialogResult.OK;
             Close();
@@ -319,6 +417,50 @@ namespace DocuLint
                 Anchor = AnchorStyles.Left | AnchorStyles.Right,
                 Width = 360,
                 Margin = new Padding(0, 2, 0, 2)
+            };
+        }
+
+        private void OpenPhraseLibrary()
+        {
+            string path = (commonPhraseLibraryPath ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                MessageBox.Show(
+                    this,
+                    "请先加载一个常用语库文件。",
+                    "常用语设置",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = path,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    this,
+                    "打开常用语库失败：\r\n" + ex.Message,
+                    "常用语设置",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+        }
+
+        private static CheckBox CreateCheckBox(string text, bool value)
+        {
+            return new CheckBox
+            {
+                Text = text,
+                Checked = value,
+                AutoSize = true,
+                Margin = new Padding(0, 5, 0, 5)
             };
         }
 

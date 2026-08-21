@@ -8,12 +8,14 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Windows.Forms;
 using Word = Microsoft.Office.Interop.Word;
 
 namespace DocuLint
 {
     // Word 工具栏（Ribbon）功能类：快速应用文档样式
+    [DesignerCategory("Code")]
     public partial class Ribbon1
     {
         private static readonly List<Ribbon1> LoadedInstances = new List<Ribbon1>();
@@ -257,6 +259,7 @@ namespace DocuLint
 
             try
             {
+                updateUiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
                 RegisterInstance();
                 UpdateHelpVersionLabel();
                 InitializeOutlineLevelDropDown();
@@ -499,12 +502,40 @@ namespace DocuLint
             }
         }
 
+        private void btnDocumentVersions_Click(object sender, RibbonControlEventArgs e)
+        {
+            Word.Application app = Globals.ThisAddIn?.Application;
+            Word.Document document = app?.ActiveDocument;
+            if (document == null)
+            {
+                MessageBox.Show("当前没有活动文档。", "文档版本管理");
+                return;
+            }
+
+            try
+            {
+                if (string.IsNullOrWhiteSpace(document.FullName) || !File.Exists(document.FullName))
+                {
+                    MessageBox.Show("请先保存当前文档，再使用版本管理。", "文档版本管理");
+                    return;
+                }
+
+                using (DocumentVersionManagementForm form = new DocumentVersionManagementForm(app, document))
+                {
+                    form.ShowDialog();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("打开版本管理失败：\r\n" + ex.Message, "文档版本管理", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
         // 刷新当前样式显示，保持和 Word 当前光标所在段落样式一致。
         internal void RefreshCurrentStyleIndicator()
         {
             string currentStyleName = GetCurrentParagraphStyleName();
-            UpdateCurrentStyleStatusBar(Globals.ThisAddIn?.Application, currentStyleName);
-            RefreshCommonStyleDropDown();
+            RefreshCommonStyleDropDown(currentStyleName);
             SelectOutlineLevelItem(GetCurrentSelectionOutlineLevel());
         }
 
@@ -945,7 +976,8 @@ namespace DocuLint
                 using (CommonStyleSettingsForm form = new CommonStyleSettingsForm(
                     progress => LoadHeadingStyleNames(doc, styleLibraryDocumentKey, progress),
                     GetConfiguredCommonStyleNames(),
-                    cachedStyleNames))
+                    cachedStyleNames,
+                    GetChapterNumberRepairFormattingSettings()))
                 {
                     if (form.ShowDialog() != DialogResult.OK)
                     {
@@ -953,6 +985,7 @@ namespace DocuLint
                     }
 
                     SaveConfiguredCommonStyleNames(form.SelectedStyleNames);
+                    SaveChapterNumberRepairFormattingSettings(form.FormattingSettings);
                     RefreshCommonStyleDropDown(true);
                 }
             }
@@ -1012,6 +1045,11 @@ namespace DocuLint
 
         private void RefreshCommonStyleDropDown(bool force = false)
         {
+            RefreshCommonStyleDropDown(GetCurrentParagraphStyleName(), force);
+        }
+
+        private void RefreshCommonStyleDropDown(string currentStyleName, bool force = false)
+        {
             if (commonStylesDropDown == null)
             {
                 return;
@@ -1019,27 +1057,32 @@ namespace DocuLint
 
             Word.Document doc = Globals.ThisAddIn?.Application?.ActiveDocument;
             string documentKey = GetCommonStylesDocumentKey(doc);
-            if (!force && string.Equals(commonStylesDocumentKey, documentKey, StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
             updatingCommonStyles = true;
             try
             {
-                commonStylesDropDown.Items.Clear();
-                if (doc != null)
+                bool documentChanged = !string.Equals(commonStylesDocumentKey, documentKey, StringComparison.OrdinalIgnoreCase);
+                if (force || documentChanged)
                 {
-                    foreach (string styleName in GetConfiguredCommonStyleNames()
-                        .Where(styleName => DocumentContainsStyle(doc, styleName)))
+                    commonStylesDropDown.Items.Clear();
+                    if (doc != null)
                     {
-                        RibbonDropDownItem item = Factory.CreateRibbonDropDownItem();
-                        item.Label = styleName;
-                        commonStylesDropDown.Items.Add(item);
+                        foreach (string styleName in GetConfiguredCommonStyleNames()
+                            .Where(styleName => DocumentContainsStyle(doc, styleName)))
+                        {
+                            RibbonDropDownItem item = Factory.CreateRibbonDropDownItem();
+                            item.Label = styleName;
+                            commonStylesDropDown.Items.Add(item);
+                        }
                     }
                 }
 
                 commonStylesDropDown.Enabled = commonStylesDropDown.Items.Count > 0;
+                RibbonDropDownItem currentItem = commonStylesDropDown.Items
+                    .Cast<RibbonDropDownItem>()
+                    .FirstOrDefault(item =>
+                        !string.IsNullOrWhiteSpace(currentStyleName) &&
+                        string.Equals(item.Label, currentStyleName.Trim(), StringComparison.OrdinalIgnoreCase));
+                commonStylesDropDown.SelectedItem = currentItem;
                 commonStylesDocumentKey = documentKey;
             }
             finally
@@ -1076,6 +1119,70 @@ namespace DocuLint
                 .ToList();
             Properties.Settings.Default.CommonStyleNames = string.Join("\n", names);
             Properties.Settings.Default.Save();
+        }
+
+        private static ChapterNumberRepairFormattingSettings GetChapterNumberRepairFormattingSettings()
+        {
+            ChapterNumberRepairFormattingSettings settings = new ChapterNumberRepairFormattingSettings();
+            try
+            {
+                string[] values = (Properties.Settings.Default.ChapterNumberRepairFormatting ?? string.Empty)
+                    .Split(new[] { '\u001f' });
+                if (values.Length != 10)
+                {
+                    return settings;
+                }
+
+                settings.ApplyFormatting = bool.TryParse(values[0], out bool apply) && apply;
+                settings.LevelOneFontName = string.IsNullOrWhiteSpace(values[1]) ? "黑体" : values[1];
+                settings.LevelOneFontSize = ParseSettingDecimal(values[2], 12M);
+                settings.OtherLevelsFontName = string.IsNullOrWhiteSpace(values[3]) ? "宋体" : values[3];
+                settings.OtherLevelsFontSize = ParseSettingDecimal(values[4], 12M);
+                settings.Bold = bool.TryParse(values[5], out bool bold) && bold;
+                settings.Alignment = ParseSettingInt(values[6], 0, 0, 3);
+                settings.LineSpacingRule = ParseSettingInt(values[7], 0, 0, 2);
+                settings.SpaceBefore = ParseSettingDecimal(values[8], 0M);
+                settings.SpaceAfter = ParseSettingDecimal(values[9], 0M);
+            }
+            catch
+            {
+            }
+
+            return settings;
+        }
+
+        private static void SaveChapterNumberRepairFormattingSettings(ChapterNumberRepairFormattingSettings settings)
+        {
+            settings = settings ?? new ChapterNumberRepairFormattingSettings();
+            Properties.Settings.Default.ChapterNumberRepairFormatting = string.Join("\u001f", new[]
+            {
+                settings.ApplyFormatting.ToString(),
+                settings.LevelOneFontName ?? "黑体",
+                settings.LevelOneFontSize.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                settings.OtherLevelsFontName ?? "宋体",
+                settings.OtherLevelsFontSize.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                settings.Bold.ToString(),
+                settings.Alignment.ToString(),
+                settings.LineSpacingRule.ToString(),
+                settings.SpaceBefore.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                settings.SpaceAfter.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            });
+            Properties.Settings.Default.Save();
+        }
+
+        private static decimal ParseSettingDecimal(string value, decimal defaultValue)
+        {
+            return decimal.TryParse(value, System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out decimal parsed)
+                ? Math.Max(0M, parsed)
+                : defaultValue;
+        }
+
+        private static int ParseSettingInt(string value, int defaultValue, int minimum, int maximum)
+        {
+            return int.TryParse(value, out int parsed)
+                ? Math.Max(minimum, Math.Min(maximum, parsed))
+                : defaultValue;
         }
 
         private static List<string> GetDocumentParagraphStyleNames(
@@ -1666,24 +1773,6 @@ namespace DocuLint
                 app.StatusBar = string.IsNullOrWhiteSpace(styleName)
                     ? "DocuLint 当前样式: <空>"
                     : "DocuLint 当前样式: " + styleName;
-            }
-            catch
-            {
-            }
-        }
-
-        private static void UpdateCurrentStyleStatusBar(Word.Application app, string styleName)
-        {
-            if (app == null)
-            {
-                return;
-            }
-
-            try
-            {
-                app.StatusBar = string.IsNullOrWhiteSpace(styleName)
-                    ? "当前样式：未读取"
-                    : "当前样式：" + styleName.Trim();
             }
             catch
             {

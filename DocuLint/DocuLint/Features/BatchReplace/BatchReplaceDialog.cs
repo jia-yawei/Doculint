@@ -126,6 +126,7 @@ namespace DocuLint
                 AllowUserToDeleteRows = false,
                 RowHeadersVisible = false,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                EditMode = DataGridViewEditMode.EditOnEnter,
                 AutoGenerateColumns = false,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
                 AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None,
@@ -138,6 +139,8 @@ namespace DocuLint
                 EnableHeadersVisualStyles = false,
                 GridColor = Color.FromArgb(229, 234, 242)
             };
+            dgvRules.CellClick += DgvRules_CellClick;
+            dgvRules.CellPainting += DgvRules_CellPainting;
             ApplyGridStyle(dgvRules);
             leftLayout.Controls.Add(dgvRules, 0, 1);
 
@@ -180,39 +183,45 @@ namespace DocuLint
                 Padding = new Padding(12),
                 BackColor = Color.White
             };
-            rightLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
+            rightLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));
             rightLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
             rightLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             rightLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
             split.Panel1.Controls.Add(rightLayout);
 
-            TableLayoutPanel patternLayout = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 3
-            };
-            patternLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112));
-            patternLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            patternLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 116));
-            rightLayout.Controls.Add(patternLayout, 0, 0);
-
-            Label lblPattern = new Label { Text = "文件来源:", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font(Font, FontStyle.Bold) };
-            patternLayout.Controls.Add(lblPattern, 0, 0);
-
-            Label lblSourceHint = new Label
-            {
-                Dock = DockStyle.Fill,
-                Text = "选择单个文件，或选择文件夹导入其中全部 Word 文档",
-                TextAlign = ContentAlignment.MiddleLeft,
-                Margin = new Padding(3, 10, 3, 8)
-            };
-            patternLayout.Controls.Add(lblSourceHint, 1, 0);
-
-            Button btnBrowseSource = new Button { Text = "浏览...", Dock = DockStyle.Fill, Margin = new Padding(3, 8, 3, 8) };
             Button btnRemoveNode = new Button { Text = "移除", Width = 88, Height = 30, Margin = new Padding(0, 4, 0, 4) };
-            ApplySecondaryButtonStyle(btnBrowseSource);
             ApplySecondaryButtonStyle(btnRemoveNode);
-            patternLayout.Controls.Add(btnBrowseSource, 2, 0);
+            FlowLayoutPanel sourceButtons = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                Padding = new Padding(0, 8, 0, 10),
+                Margin = Padding.Empty
+            };
+            Button btnBrowseFiles = new Button
+            {
+                Text = "选择文件",
+                AutoSize = true,
+                MinimumSize = new Size(126, 34),
+                Height = 34,
+                Margin = new Padding(0, 0, 8, 0)
+            };
+            Button btnBrowseFolder = new Button
+            {
+                Text = "选择文件夹",
+                AutoSize = true,
+                MinimumSize = new Size(142, 34),
+                Height = 34,
+                Margin = new Padding(0)
+            };
+            ApplySecondaryButtonStyle(btnBrowseFiles);
+            ApplySecondaryButtonStyle(btnBrowseFolder);
+            sourceButtons.Controls.Add(btnBrowseFiles);
+            sourceButtons.Controls.Add(btnBrowseFolder);
+            rightLayout.Controls.Add(sourceButtons, 0, 0);
 
             TableLayoutPanel fileHeaderLayout = new TableLayoutPanel
             {
@@ -261,7 +270,8 @@ namespace DocuLint
 
             btnAddRule.Click += (s, e) => AddDefaultRule();
             btnDeleteRule.Click += (s, e) => DeleteSelectedRules();
-            btnBrowseSource.Click += (s, e) => ShowSourceBrowseMenu(btnBrowseSource);
+            btnBrowseFiles.Click += (s, e) => AddFileNodes();
+            btnBrowseFolder.Click += (s, e) => AddFolderNode();
             btnRemoveNode.Click += (s, e) => RemoveSelectedNode();
             tvFiles.NodeMouseClick += TvFiles_NodeMouseClick;
 
@@ -348,6 +358,59 @@ namespace DocuLint
             dgvRules.Rows[row].Cells["colFindText"].Value = "";
             dgvRules.Rows[row].Cells["colReplaceText"].Value = "";
             RefreshRuleRowNumbers();
+
+            dgvRules.CurrentCell = dgvRules.Rows[row].Cells["colFindText"];
+            dgvRules.Rows[row].Selected = true;
+            BeginInvoke((Action)(() =>
+            {
+                if (!IsDisposed && dgvRules.Rows.Count > row)
+                {
+                    dgvRules.CurrentCell = dgvRules.Rows[row].Cells["colFindText"];
+                    dgvRules.BeginEdit(true);
+                }
+            }));
+        }
+
+        private void DgvRules_CellClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex <= 0 || e.RowIndex >= dgvRules.Rows.Count)
+            {
+                return;
+            }
+
+            dgvRules.CurrentCell = dgvRules.Rows[e.RowIndex].Cells[e.ColumnIndex];
+            dgvRules.BeginEdit(true);
+        }
+
+        private void DgvRules_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 1 || e.ColumnIndex > 2 ||
+                e.RowIndex >= dgvRules.Rows.Count ||
+                !string.IsNullOrWhiteSpace(Convert.ToString(dgvRules.Rows[e.RowIndex].Cells[e.ColumnIndex].Value)))
+            {
+                return;
+            }
+
+            e.Paint(e.ClipBounds, e.PaintParts);
+            string placeholder = e.ColumnIndex == 1
+                ? "输入查找内容"
+                : "输入替换内容（可选）";
+            Color textColor = e.State.HasFlag(DataGridViewElementStates.Selected)
+                ? Color.FromArgb(110, 110, 110)
+                : Color.FromArgb(145, 145, 145);
+            Rectangle textBounds = new Rectangle(
+                e.CellBounds.Left + 8,
+                e.CellBounds.Top + 1,
+                Math.Max(0, e.CellBounds.Width - 16),
+                Math.Max(0, e.CellBounds.Height - 2));
+            TextRenderer.DrawText(
+                e.Graphics,
+                placeholder,
+                dgvRules.Font,
+                textBounds,
+                textColor,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            e.Handled = true;
         }
 
         private void DeleteSelectedRules()
@@ -370,27 +433,12 @@ namespace DocuLint
             }
         }
 
-        private void ShowSourceBrowseMenu(Control anchor)
-        {
-            ContextMenuStrip menu = new ContextMenuStrip();
-            ToolStripMenuItem fileItem = new ToolStripMenuItem("选择文件...");
-            fileItem.ToolTipText = "导入一个或多个指定的 Word 文档";
-            fileItem.Click += (_, __) => AddFileNodes();
-            ToolStripMenuItem folderItem = new ToolStripMenuItem("选择文件夹...");
-            folderItem.ToolTipText = "导入所选文件夹及其子文件夹中的全部 Word 文档";
-            folderItem.Click += (_, __) => AddFolderNode();
-            menu.Items.Add(fileItem);
-            menu.Items.Add(folderItem);
-            menu.Closed += (_, __) => menu.Dispose();
-            menu.Show(anchor, new Point(0, anchor.Height));
-        }
-
         private void AddFolderNode()
         {
             using (FolderBrowserDialog dialog = new FolderBrowserDialog())
             {
                 dialog.Description = "请选择文件夹";
-                if (dialog.ShowDialog() != DialogResult.OK)
+                if (dialog.ShowDialog(this) != DialogResult.OK)
                 {
                     return;
                 }
@@ -435,7 +483,7 @@ namespace DocuLint
                 dialog.Multiselect = true;
                 dialog.Filter = "Word 文档 (*.doc;*.docx;*.docm)|*.doc;*.docx;*.docm|所有文件 (*.*)|*.*";
 
-                if (dialog.ShowDialog() != DialogResult.OK)
+                if (dialog.ShowDialog(this) != DialogResult.OK)
                 {
                     return;
                 }

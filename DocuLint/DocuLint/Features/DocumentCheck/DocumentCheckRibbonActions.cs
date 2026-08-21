@@ -33,11 +33,12 @@ namespace DocuLint
                     return;
                 }
 
-                bool checkBlankLines = chkNonBodyBlankLine.Checked;
-                bool checkCaptions = chkCaptionContinuity.Checked;
-                bool checkLists = chkListContinuity.Checked;
-                bool checkStyles = chkStyleConsistency.Checked;
-                bool checkBrokenReferences = chkBrokenReferences.Checked;
+                DocumentCheckSettings settings = GetCurrentDocumentCheckSettings();
+                bool checkBlankLines = settings.CheckNonBodyBlankLines;
+                bool checkCaptions = settings.CheckCaptionContinuity;
+                bool checkLists = settings.CheckListContinuity;
+                bool checkStyles = settings.CheckStyleConsistency;
+                bool checkBrokenReferences = settings.CheckBrokenReferences;
                 if (!checkBlankLines && !checkCaptions && !checkLists && !checkStyles && !checkBrokenReferences)
                 {
                     MessageBox.Show("请至少选择一个检查项。", "文档检查");

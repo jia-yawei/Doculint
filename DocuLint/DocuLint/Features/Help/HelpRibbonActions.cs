@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Office.Tools.Ribbon;
 
@@ -12,6 +13,7 @@ namespace DocuLint
         private const string HelpDocumentFileName = "插件帮助文档.html";
         private const string VersionHistoryFileName = "版本更新记录.html";
         private bool helpAboutItemsInitialized;
+        private SynchronizationContext updateUiContext;
 
         private void btnOpenHelpDocument_Click(object sender, RibbonControlEventArgs e)
         {
@@ -40,7 +42,47 @@ namespace DocuLint
                 btnHelpVersion.Enabled = true;
                 btnHelpVersion.Click += btnHelpVersion_Click;
             }
+            if (btnCheckUpdates != null)
+            {
+                btnCheckUpdates.Click += btnCheckUpdates_Click;
+            }
             helpAboutItemsInitialized = true;
+        }
+
+        private void btnCheckUpdates_Click(object sender, RibbonControlEventArgs e)
+        {
+            using (PluginUpdateForm form = new PluginUpdateForm())
+            {
+                form.ShowDialog();
+            }
+        }
+
+        internal void CheckUpdatesAutomatically()
+        {
+            if (!Properties.Settings.Default.UpdateAutoCheck)
+            {
+                return;
+            }
+
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                PluginUpdateManifest manifest = PluginUpdateService.LoadFromGitHub(
+                    PluginUpdateService.DefaultGitHubManifestUrl,
+                    out string error);
+                if (manifest == null || manifest.ParsedVersion <= PluginUpdateService.CurrentVersion ||
+                    string.Equals(Properties.Settings.Default.UpdateSkippedVersion, manifest.Version, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                (updateUiContext ?? SynchronizationContext.Current)?.Post(_ =>
+                {
+                    using (PluginUpdateForm form = new PluginUpdateForm(true))
+                    {
+                        form.ShowDialog();
+                    }
+                }, null);
+            });
         }
 
         private void btnHelpVersion_Click(object sender, RibbonControlEventArgs e)

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -15,6 +16,8 @@ namespace DocuLint
         private const float DefaultOuterBorderWidthPt = 1.5f;
         private static TablesAndFiguresFormattingSettings currentTablesAndFiguresFormattingSettings =
             TablesAndFiguresFormattingSettings.CreateDefault();
+        private static DocumentCheckSettings currentDocumentCheckSettings =
+            DocumentCheckSettings.CreateDefault();
 
         internal static void ShowTablesAndFiguresFormattingSettingsDialog()
         {
@@ -22,7 +25,8 @@ namespace DocuLint
             using (TablesAndFiguresFormattingSettingsForm settingsForm =
                 new TablesAndFiguresFormattingSettingsForm(
                     dialogDefaults,
-                    CommonPhraseLibrary.ConfiguredPath))
+                    CommonPhraseLibrary.ConfiguredPath,
+                    currentDocumentCheckSettings))
             {
                 if (settingsForm.ShowDialog() != DialogResult.OK)
                 {
@@ -31,6 +35,8 @@ namespace DocuLint
 
                 currentTablesAndFiguresFormattingSettings = settingsForm.Settings?.Clone()
                     ?? TablesAndFiguresFormattingSettings.CreateDefault();
+                currentDocumentCheckSettings = settingsForm.DocumentCheckSettings?.Clone()
+                    ?? DocumentCheckSettings.CreateDefault();
                 CommonPhraseLibrary.SaveConfiguredPath(settingsForm.CommonPhraseLibraryPath);
                 Globals.ThisAddIn?.RefreshCommonPhrasesPane();
             }
@@ -39,6 +45,11 @@ namespace DocuLint
         private static TableFormattingOptions GetCurrentTableFormattingOptions()
         {
             return (currentTablesAndFiguresFormattingSettings?.TableOptions ?? TableFormattingOptions.CreateDefault()).Clone();
+        }
+
+        internal static DocumentCheckSettings GetCurrentDocumentCheckSettings()
+        {
+            return (currentDocumentCheckSettings ?? DocumentCheckSettings.CreateDefault()).Clone();
         }
 
 
@@ -63,6 +74,18 @@ namespace DocuLint
                     return;
                 }
 
+                int splitRowIndex = GetSelectionRowNumber(selection);
+                int totalRows = GetTableRowCount(sourceTable);
+                if (splitRowIndex <= 1 || splitRowIndex > totalRows)
+                {
+                    MessageBox.Show(
+                        "请先把光标放在要成为续表首行的单元格中，再点击“按续表拆分”。",
+                        "按续表拆分",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return;
+                }
+
                 Word.Paragraph captionParagraph = GetNearestNonEmptyParagraphBeforeTableParagraph(doc, sourceTable);
                 string baseCaption = ExtractTableCaptionBase(captionParagraph == null
                     ? string.Empty
@@ -74,45 +97,517 @@ namespace DocuLint
                 }
 
                 int sourceTableStart = sourceTable.Range.Start;
-                int sourceTableEnd = sourceTable.Range.End;
-                int tableCountBefore = doc.Tables?.Count ?? 0;
-
-                using (new WordPerformanceScope(app))
+                ContinuationHeaderSelectionForm selector = new ContinuationHeaderSelectionForm(
+                    splitRowIndex - 1,
+                    mode => CompleteContinuationTableSplit(doc, sourceTableStart, splitRowIndex, baseCaption, mode),
+                    () =>
+                    {
+                        try
+                        {
+                            app.ActiveWindow?.Activate();
+                        }
+                        catch
+                        {
+                        }
+                    });
+                selector.Show();
+                try
                 {
-                    if (!TryExecuteNativeSplitTable(selection))
-                    {
-                        MessageBox.Show("拆分表格失败。请确认光标位于需要成为第二个表格首行的单元格中。", "文档不加班");
-                        return;
-                    }
-
-                    int tableCountAfter = doc.Tables?.Count ?? 0;
-                    if (tableCountAfter <= tableCountBefore)
-                    {
-                        MessageBox.Show("拆分表格命令未生成第二个表格。请把光标放到需要成为续表首行的单元格中。", "文档不加班");
-                        return;
-                    }
-
-                    Word.Table continuationTable = FindSplitContinuationTable(doc, sourceTableStart, sourceTableEnd);
-                    if (continuationTable?.Range == null)
-                    {
-                        MessageBox.Show("表格已执行拆分命令，但未找到拆分后的续表。", "文档不加班");
-                        return;
-                    }
-
-                    Word.Table leadingTable = FindPreviousTableBefore(doc, continuationTable.Range.Start, sourceTableStart - 1)
-                        ?? sourceTable;
-                    ApplyLeadingBottomOuterBorder(leadingTable);
-                    ApplyContinuationTopOuterBorder(continuationTable);
-
-                    if (!InsertSimpleContinuationCaptionBeforeTable(doc, continuationTable, baseCaption + "（续）"))
-                    {
-                        MessageBox.Show("表格已拆分，但未能在续表前找到可写入题注的表外段落。", "文档不加班");
-                    }
+                    // Keep Word active so the user can immediately drag-select the header.
+                    app.ActiveWindow?.Activate();
+                }
+                catch
+                {
                 }
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"拆分表格失败: {ex.Message}", "文档不加班");
+            }
+        }
+
+        private bool CompleteContinuationTableSplit(
+            Word.Document doc,
+            int sourceTableStart,
+            int splitRowIndex,
+            string baseCaption,
+            ContinuationHeaderMode headerMode)
+        {
+            Word.Application app = Globals.ThisAddIn?.Application;
+            Word.Table sourceTable = FindTableContainingPosition(doc, sourceTableStart);
+            if (doc == null || sourceTable?.Range == null)
+            {
+                MessageBox.Show("当前表格已不可用，请重新开始按续表拆分。", "按续表拆分", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            int headerRowCount = 1;
+            if (headerMode == ContinuationHeaderMode.Custom)
+            {
+                Word.Selection headerSelection = app?.Selection;
+                if (headerSelection?.Range == null ||
+                    !TryGetSelectedHeaderRowCount(headerSelection, sourceTable, splitRowIndex, out headerRowCount))
+                {
+                    MessageBox.Show(
+                        "请在原表格中从第一行开始选中完整表头，且表头行不能包含拆分点所在行。",
+                        "按续表拆分",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return false;
+                }
+            }
+
+            int sourceTableEnd = sourceTable.Range.End;
+            int tableCountBefore = doc.Tables?.Count ?? 0;
+            Word.Cell splitCell = GetFirstCellInRow(sourceTable, splitRowIndex);
+            if (splitCell?.Range == null)
+            {
+                MessageBox.Show("未找到拆分行，请重新开始按续表拆分。", "按续表拆分", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+
+            try
+            {
+                using (new WordPerformanceScope(app))
+                {
+                    app.Selection.SetRange(splitCell.Range.Start, splitCell.Range.Start);
+                    if (!TryExecuteNativeSplitTable(app.Selection) || (doc.Tables?.Count ?? 0) <= tableCountBefore)
+                    {
+                        throw new InvalidOperationException("未能在指定行拆分表格。");
+                    }
+
+                    Word.Table continuationTable = FindSplitContinuationTable(doc, sourceTableStart, sourceTableEnd);
+                    if (continuationTable?.Range == null)
+                    {
+                        throw new InvalidOperationException("表格已拆分，但未找到拆分后的续表。");
+                    }
+
+                    // Keep using the table object captured before SplitTable. Looking it up
+                    // again by character position can resolve to the new continuation table
+                    // after Word reflows the document ranges.
+                    Word.Table leadingTable = sourceTable;
+                    if (leadingTable == null || leadingTable.Range == null ||
+                        leadingTable.Range.Start >= continuationTable.Range.Start)
+                    {
+                        leadingTable = FindPreviousTableBefore(doc, continuationTable.Range.Start, sourceTableStart - 1)
+                            ?? sourceTable;
+                    }
+                    if (!CopyHeaderRowsToContinuationTable(doc, leadingTable, continuationTable, headerRowCount))
+                    {
+                        throw new InvalidOperationException("续表已生成，但复制表头失败。");
+                    }
+
+                    CopyTableGeometry(leadingTable, continuationTable);
+                    ApplyLeadingBottomOuterBorder(leadingTable);
+                    ApplyContinuationTopOuterBorder(continuationTable);
+                    if (!InsertSimpleContinuationCaptionBeforeTable(doc, continuationTable, baseCaption + "（续）"))
+                    {
+                        throw new InvalidOperationException("续表已生成，但未能在续表前写入题注。");
+                    }
+                }
+
+                app?.ScreenRefresh();
+                MessageBox.Show("已完成表格拆分，并为续表补充表头和续表题注。", "按续表拆分", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("拆分表格失败：" + ex.Message, "按续表拆分", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+        }
+
+        private static bool TryGetSelectedHeaderRowCount(
+            Word.Selection selection,
+            Word.Table sourceTable,
+            int splitRowIndex,
+            out int headerRowCount)
+        {
+            headerRowCount = 0;
+            if (selection?.Range == null || sourceTable?.Range == null || splitRowIndex <= 1)
+            {
+                return false;
+            }
+
+            Word.Range selectedRange = selection.Range;
+            if (selectedRange.Start < sourceTable.Range.Start || selectedRange.End > sourceTable.Range.End)
+            {
+                return false;
+            }
+
+            int firstRow = int.MaxValue;
+            int lastRow = 0;
+            try
+            {
+                foreach (Word.Cell cell in sourceTable.Range.Cells)
+                {
+                    if (cell?.Range == null || cell.Range.End <= selectedRange.Start || cell.Range.Start >= selectedRange.End)
+                    {
+                        continue;
+                    }
+
+                    int row = GetCellRowIndex(cell);
+                    if (row > 0)
+                    {
+                        firstRow = Math.Min(firstRow, row);
+                        lastRow = Math.Max(lastRow, row);
+                    }
+                }
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (firstRow != 1 || lastRow <= 0 || lastRow >= splitRowIndex)
+            {
+                return false;
+            }
+
+            headerRowCount = lastRow;
+            return true;
+        }
+
+        private static bool CopyHeaderRowsToContinuationTable(
+            Word.Document doc,
+            Word.Table sourceTable,
+            Word.Table continuationTable,
+            int headerRowCount)
+        {
+            if (doc == null || sourceTable?.Range == null || continuationTable?.Range == null || headerRowCount < 1)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (GetTableRowCount(sourceTable) < headerRowCount ||
+                    GetTableRowCount(continuationTable) < headerRowCount)
+                {
+                    return false;
+                }
+
+                for (int row = 0; row < headerRowCount; row++)
+                {
+                    continuationTable.Rows.Add(BeforeRow: continuationTable.Rows[1]);
+                }
+
+                // A custom header may contain vertical or horizontal merged cells. Rebuild
+                // its merge structure before copying content, rather than assuming every
+                // header row has the same number of cells as the continuation data rows.
+                if (!MirrorHeaderMergedCells(sourceTable, continuationTable, headerRowCount) ||
+                    !CopyHeaderCells(sourceTable, continuationTable, headerRowCount))
+                {
+                    return false;
+                }
+
+                ClearHeaderAutomaticNumbering(continuationTable, headerRowCount);
+                int safeHeaderRows = Math.Min(headerRowCount, GetTableRowCount(continuationTable));
+                for (int row = 1; row <= safeHeaderRows; row++)
+                {
+                    try
+                    {
+                        // Rows.Add can inherit the first data row's automatic numbering
+                        // (for example 9). Remove that numbering from the copied header;
+                        // the data row below must retain its own sequence number.
+                        continuationTable.Rows[row].Range.ListFormat.RemoveNumbers();
+                        continuationTable.Rows[row].HeadingFormat = -1;
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void ClearHeaderAutomaticNumbering(Word.Table table, int headerRowCount)
+        {
+            if (table?.Range?.Cells == null)
+            {
+                return;
+            }
+
+            HashSet<int> processedCellStarts = new HashSet<int>();
+            try
+            {
+                foreach (Word.Cell cell in table.Range.Cells)
+                {
+                    if (cell?.Range == null || GetCellRowIndex(cell) > headerRowCount ||
+                        !processedCellStarts.Add(cell.Range.Start))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        cell.Range.ListFormat.RemoveNumbers();
+                    }
+                    catch
+                    {
+                    }
+
+                    try
+                    {
+                        foreach (Word.Paragraph paragraph in cell.Range.Paragraphs)
+                        {
+                            paragraph?.Range?.ListFormat?.RemoveNumbers();
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static void CopyTableGeometry(Word.Table sourceTable, Word.Table continuationTable)
+        {
+            if (sourceTable == null || continuationTable == null)
+            {
+                return;
+            }
+
+            try
+            {
+                continuationTable.AllowAutoFit = false;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                continuationTable.PreferredWidthType = sourceTable.PreferredWidthType;
+                continuationTable.PreferredWidth = sourceTable.PreferredWidth;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                continuationTable.Rows.Alignment = sourceTable.Rows.Alignment;
+                continuationTable.Rows.SetLeftIndent(sourceTable.Rows.LeftIndent, Word.WdRulerStyle.wdAdjustNone);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                int columnCount = Math.Min(sourceTable.Columns.Count, continuationTable.Columns.Count);
+                for (int column = 1; column <= columnCount; column++)
+                {
+                    continuationTable.Columns[column].SetWidth(
+                        sourceTable.Columns[column].Width,
+                        Word.WdRulerStyle.wdAdjustNone);
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                continuationTable.AutoFitBehavior(Word.WdAutoFitBehavior.wdAutoFitFixed);
+            }
+            catch
+            {
+            }
+        }
+
+        private static string RemoveCellEndMarkers(string text)
+        {
+            return (text ?? string.Empty).TrimEnd('\a', '\r');
+        }
+
+        private static bool MirrorHeaderMergedCells(
+            Word.Table sourceTable,
+            Word.Table destinationTable,
+            int headerRowCount)
+        {
+            try
+            {
+                int columnCount = GetTableColumnCount(destinationTable);
+                if (columnCount < 1)
+                {
+                    return false;
+                }
+
+                List<Word.Cell> headerCells = new List<Word.Cell>();
+                Dictionary<int, List<int>> sourceColumnsByRow = new Dictionary<int, List<int>>();
+                HashSet<int> processedStarts = new HashSet<int>();
+                foreach (Word.Cell sourceCell in sourceTable.Range.Cells)
+                {
+                    int firstRow = GetCellRowIndex(sourceCell);
+                    int firstColumn = GetCellColumnIndex(sourceCell);
+                    if (sourceCell?.Range == null || firstRow < 1 || firstRow > headerRowCount || firstColumn < 1 ||
+                        !processedStarts.Add(sourceCell.Range.Start))
+                    {
+                        continue;
+                    }
+
+                    headerCells.Add(sourceCell);
+                    if (!sourceColumnsByRow.TryGetValue(firstRow, out List<int> columns))
+                    {
+                        columns = new List<int>();
+                        sourceColumnsByRow.Add(firstRow, columns);
+                    }
+
+                    columns.Add(firstColumn);
+                }
+
+                foreach (List<int> columns in sourceColumnsByRow.Values)
+                {
+                    columns.Sort();
+                }
+
+                foreach (Word.Cell sourceCell in headerCells)
+                {
+                    int firstRow = GetCellRowIndex(sourceCell);
+                    int firstColumn = GetCellColumnIndex(sourceCell);
+                    List<int> rowColumns = sourceColumnsByRow[firstRow];
+                    int nextColumn = rowColumns.FirstOrDefault(column => column > firstColumn);
+                    int lastColumn = nextColumn > 0 ? nextColumn - 1 : columnCount;
+                    int lastRow = firstRow;
+
+                    // Word exposes a vertically merged cell only on its first row. A
+                    // missing cell origin at the same column in the following header row
+                    // therefore means that the source cell continues into that row.
+                    while (lastRow < headerRowCount &&
+                        (!sourceColumnsByRow.TryGetValue(lastRow + 1, out List<int> nextRowColumns) ||
+                         !nextRowColumns.Contains(firstColumn)))
+                    {
+                        lastRow++;
+                    }
+
+                    if (lastRow > firstRow || lastColumn > firstColumn)
+                    {
+                        Word.Cell firstDestinationCell = TryGetTableCell(destinationTable, firstRow, firstColumn);
+                        Word.Cell lastDestinationCell = TryGetTableCell(destinationTable, lastRow, lastColumn);
+                        if (firstDestinationCell == null || lastDestinationCell == null)
+                        {
+                            return false;
+                        }
+
+                        firstDestinationCell.Merge(lastDestinationCell);
+                    }
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool CopyHeaderCells(Word.Table sourceTable, Word.Table destinationTable, int headerRowCount)
+        {
+            try
+            {
+                HashSet<int> processedStarts = new HashSet<int>();
+                foreach (Word.Cell sourceCell in sourceTable.Range.Cells)
+                {
+                    int row = GetCellRowIndex(sourceCell);
+                    int column = GetCellColumnIndex(sourceCell);
+                    if (sourceCell?.Range == null || row < 1 || row > headerRowCount || column < 1 ||
+                        !processedStarts.Add(sourceCell.Range.Start))
+                    {
+                        continue;
+                    }
+
+                    Word.Cell destinationCell = TryGetTableCell(destinationTable, row, column);
+                    if (destinationCell?.Range == null)
+                    {
+                        return false;
+                    }
+
+                    Word.Range sourceRange = sourceCell.Range.Duplicate;
+                    Word.Range destinationRange = destinationCell.Range.Duplicate;
+                    sourceRange.End = Math.Max(sourceRange.Start, sourceRange.End - 1);
+                    destinationRange.End = Math.Max(destinationRange.Start, destinationRange.End - 1);
+                    destinationRange.Text = RemoveCellEndMarkers(sourceRange.Text);
+                    destinationRange = destinationCell.Range.Duplicate;
+                    destinationRange.End = Math.Max(destinationRange.Start, destinationRange.End - 1);
+                    destinationRange.FormattedText = sourceRange.FormattedText;
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static Word.Cell TryGetTableCell(Word.Table table, int row, int column)
+        {
+            if (table == null || row < 1 || column < 1)
+            {
+                return null;
+            }
+
+            try
+            {
+                return table.Cell(row, column);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static int GetTableColumnCount(Word.Table table)
+        {
+            try
+            {
+                return table?.Rows?[1]?.Cells?.Count ?? 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static int GetHeaderEndPosition(Word.Table table, int headerRowCount)
+        {
+            if (table?.Range == null || headerRowCount < 1)
+            {
+                return 0;
+            }
+
+            try
+            {
+                return table.Rows[Math.Min(headerRowCount, table.Rows.Count)].Range.End;
+            }
+            catch
+            {
+                int end = table.Range.Start;
+                try
+                {
+                    foreach (Word.Cell cell in table.Range.Cells)
+                    {
+                        if (GetCellRowIndex(cell) <= headerRowCount && cell?.Range != null)
+                        {
+                            end = Math.Max(end, cell.Range.End);
+                        }
+                    }
+                }
+                catch
+                {
+                }
+
+                return end;
             }
         }
 
@@ -2226,6 +2721,178 @@ namespace DocuLint
             catch
             {
                 return false;
+            }
+        }
+
+        private enum ContinuationHeaderMode
+        {
+            DefaultFirstRow,
+            Custom
+        }
+
+        private sealed class ContinuationHeaderSelectionForm : Form
+        {
+            private readonly Func<ContinuationHeaderMode, bool> completeAction;
+            private readonly Action activateWordAction;
+            private readonly Label hint;
+            private readonly Label status;
+            private readonly RadioButton customHeaderRadioButton;
+
+            internal ContinuationHeaderSelectionForm(
+                int maximumHeaderRows,
+                Func<ContinuationHeaderMode, bool> completeAction,
+                Action activateWordAction)
+            {
+                this.completeAction = completeAction;
+                this.activateWordAction = activateWordAction;
+                Text = "指定续表表头";
+                FormBorderStyle = FormBorderStyle.FixedToolWindow;
+                StartPosition = FormStartPosition.CenterScreen;
+                ShowInTaskbar = false;
+                TopMost = true;
+                ControlBox = true;
+                AutoScaleMode = AutoScaleMode.Dpi;
+                Font = new Font("Microsoft YaHei UI", 9F);
+                ClientSize = new Size(680, 340);
+                MinimumSize = new Size(620, 320);
+                MinimizeBox = false;
+                MaximizeBox = false;
+
+                TableLayoutPanel layout = new TableLayoutPanel
+                {
+                    Dock = DockStyle.Fill,
+                    ColumnCount = 1,
+                    RowCount = 5,
+                    Padding = new Padding(16)
+                };
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+                Label title = new Label
+                {
+                    AutoSize = true,
+                    Text = "选择续表表头方式",
+                    Font = new Font(Font, FontStyle.Bold),
+                    Margin = new Padding(0, 0, 0, 8)
+                };
+                FlowLayoutPanel modes = new FlowLayoutPanel
+                {
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    Dock = DockStyle.Fill,
+                    FlowDirection = FlowDirection.TopDown,
+                    WrapContents = false,
+                    Margin = new Padding(0, 0, 0, 6)
+                };
+                RadioButton defaultHeaderRadioButton = new RadioButton
+                {
+                    AutoSize = true,
+                    Text = "默认表头（当前表格的第一行）",
+                    Checked = true,
+                    Margin = new Padding(0, 0, 0, 5)
+                };
+                customHeaderRadioButton = new RadioButton
+                {
+                    AutoSize = true,
+                    Text = "自定义表头（在 Word 中手动选中表头）",
+                    Margin = new Padding(0)
+                };
+                modes.Controls.Add(defaultHeaderRadioButton);
+                modes.Controls.Add(customHeaderRadioButton);
+
+                hint = new Label
+                {
+                    Dock = DockStyle.Top,
+                    AutoSize = true,
+                    TextAlign = ContentAlignment.MiddleLeft,
+                    Padding = new Padding(0, 3, 0, 3),
+                    ForeColor = Color.FromArgb(55, 65, 80)
+                };
+                status = new Label
+                {
+                    AutoSize = true,
+                    ForeColor = Color.FromArgb(85, 95, 110),
+                    Margin = new Padding(0, 4, 0, 10)
+                };
+                FlowLayoutPanel buttons = new FlowLayoutPanel
+                {
+                    AutoSize = true,
+                    FlowDirection = FlowDirection.RightToLeft,
+                    Dock = DockStyle.Fill,
+                    WrapContents = false,
+                    Padding = new Padding(0, 2, 0, 0),
+                    Margin = new Padding(0),
+                    MinimumSize = new Size(0, 42)
+                };
+                Button completeButton = new Button
+                {
+                    Text = "完成并拆分",
+                    AutoSize = true,
+                    Height = 34,
+                    MinimumSize = new Size(104, 32),
+                    Margin = new Padding(8, 0, 0, 0)
+                };
+                Button cancelButton = new Button
+                {
+                    Text = "取消",
+                    AutoSize = true,
+                    Height = 34,
+                    MinimumSize = new Size(78, 32)
+                };
+                completeButton.Click += (_, __) =>
+                {
+                    ContinuationHeaderMode mode = customHeaderRadioButton.Checked
+                        ? ContinuationHeaderMode.Custom
+                        : ContinuationHeaderMode.DefaultFirstRow;
+                    if (completeAction?.Invoke(mode) == true)
+                    {
+                        Close();
+                    }
+                };
+                cancelButton.Click += (_, __) => Close();
+                defaultHeaderRadioButton.CheckedChanged += (_, __) => UpdateModeHint(maximumHeaderRows);
+                customHeaderRadioButton.CheckedChanged += (_, __) => UpdateModeHint(maximumHeaderRows);
+                buttons.Controls.Add(completeButton);
+                buttons.Controls.Add(cancelButton);
+                layout.Controls.Add(title, 0, 0);
+                layout.Controls.Add(modes, 0, 1);
+                layout.Controls.Add(hint, 0, 2);
+                layout.Controls.Add(status, 0, 3);
+                layout.Controls.Add(buttons, 0, 4);
+                Controls.Add(layout);
+                UpdateModeHint(maximumHeaderRows);
+            }
+
+            private void UpdateModeHint(int maximumHeaderRows)
+            {
+                if (customHeaderRadioButton.Checked)
+                {
+                    hint.Text = "请回到 Word，在原表格中从第一行开始连续选中表头。\r\n" +
+                        "表头最多可选择 " + maximumHeaderRows + " 行，不能包含续表的首行。";
+                    status.Text = "选中后点击“完成并拆分”，插件会将所选表头复制到续表。";
+                    BeginInvoke(new Action(() => activateWordAction?.Invoke()));
+                    return;
+                }
+
+                hint.Text = "将使用当前表格的第一行作为续表表头，无需额外选择。";
+                status.Text = "点击“完成并拆分”后，插件会自动拆分表格、复制表头并补充续表题注。";
+            }
+
+            // Do not activate this tool window when it is shown. Word remains the active
+            // window, so drag-selection of the table header is uninterrupted.
+            protected override bool ShowWithoutActivation => true;
+
+            protected override CreateParams CreateParams
+            {
+                get
+                {
+                    CreateParams parameters = base.CreateParams;
+                    parameters.ExStyle |= 0x08000000; // WS_EX_NOACTIVATE
+                    return parameters;
+                }
             }
         }
 

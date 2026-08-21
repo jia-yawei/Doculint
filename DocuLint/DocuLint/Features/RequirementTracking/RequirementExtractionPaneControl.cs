@@ -17,7 +17,7 @@ namespace DocuLint
         private readonly DataGridView grid;
         private readonly FlowLayoutPanel normalModeActions;
         private readonly FlowLayoutPanel customModeActions;
-        private readonly TabControl extractionModeTabs;
+        private readonly ComboBox extractionModeSelector;
         private readonly Button btnRefresh;
         private readonly Button btnCustomBatchExtraction;
         private readonly Button btnCustomSave;
@@ -122,34 +122,24 @@ namespace DocuLint
                 Padding = new Padding(0, 0, 0, 4),
                 Margin = Padding.Empty
             };
-            TabPage normalExtractionTab = new TabPage("常规提取")
+            extractionModeSelector = new ComboBox
             {
-                BackColor = Color.White,
-                Padding = Padding.Empty
-            };
-            TabPage customExtractionTab = new TabPage("自定义提取")
-            {
-                BackColor = Color.White,
-                Padding = Padding.Empty
-            };
-            extractionModeTabs = new TabControl
-            {
-                Size = new Size(216, 34),
-                Padding = new Point(10, 4),
-                Appearance = TabAppearance.Normal,
-                HotTrack = true,
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font("Microsoft YaHei UI", 9F),
+                Width = 156,
+                Height = 32,
                 Margin = new Padding(0, 0, 8, 0)
             };
-            extractionModeTabs.TabPages.Add(normalExtractionTab);
-            extractionModeTabs.TabPages.Add(customExtractionTab);
-            extractionModeTabs.SelectedIndexChanged += (_, __) =>
+            extractionModeSelector.Items.AddRange(new object[] { "常规提取", "自定义提取" });
+            extractionModeSelector.SelectedIndex = 0;
+            extractionModeSelector.SelectedIndexChanged += (_, __) =>
             {
                 if (!updatingExtractionViewMode)
                 {
-                    SetCustomMode(extractionModeTabs.SelectedIndex == 1, true);
+                    SetCustomMode(extractionModeSelector.SelectedIndex == 1, true);
                 }
             };
-            viewModeSelector.Controls.Add(extractionModeTabs);
+            viewModeSelector.Controls.Add(extractionModeSelector);
 
             normalModeActions = new FlowLayoutPanel
             {
@@ -224,7 +214,8 @@ namespace DocuLint
             btnSave.Click += (_, __) => SaveToCurrentDocument();
             ApplySecondaryButtonStyle(btnExtractionEnabled);
             ApplySecondaryButtonStyle(btnBatchExtraction);
-            PlaceToolbarButton(btnRefresh, viewModeSelector, 122);
+            // 选项卡行只保留模式切换，加载和编辑操作统一放到下一行，避免窄窗格裁切。
+            PlaceToolbarButton(btnRefresh, normalModeActions, 122);
             PlaceToolbarButton(btnBatchExtraction, normalModeActions, 146);
             PlaceToolbarButton(btnClearSelected, normalModeActions, 72);
             PlaceToolbarButton(btnClearAll, normalModeActions, 124);
@@ -239,7 +230,7 @@ namespace DocuLint
             toolTip.SetToolTip(btnClearAll, "清空全部需求名称和章节号，保留需求标识");
             toolTip.SetToolTip(btnDelete, "删除全部需求提取结果；删除后需重新点击加载标识");
             toolTip.SetToolTip(btnSave, "将当前需求表保存到 Word 文档");
-            toolTip.SetToolTip(extractionModeTabs, "切换常规提取和自定义提取界面");
+            toolTip.SetToolTip(extractionModeSelector, "切换常规提取和自定义提取界面");
             toolTip.SetToolTip(cmbCustomExtractionMode, "选择选区写入需求标识、需求名称，或按标识与名称交替写入");
             toolTip.SetToolTip(btnCustomBatchExtraction, "开启后，选择文档文字会按当前方式自动写入需求表");
 
@@ -520,7 +511,7 @@ namespace DocuLint
             updatingExtractionViewMode = true;
             try
             {
-                extractionModeTabs.SelectedIndex = customMode ? 1 : 0;
+                extractionModeSelector.SelectedIndex = customMode ? 1 : 0;
             }
             finally
             {

@@ -39,7 +39,7 @@
     <PublishUrl>E:\my_VSTO\搞快点发布\</PublishUrl>
     <InstallUrl />
     <TargetCulture>zh-chs</TargetCulture>
-    <ApplicationVersion>0.0.1.6</ApplicationVersion>
+    <ApplicationVersion>0.0.1.7</ApplicationVersion>
     <AutoIncrementApplicationRevision>true</AutoIncrementApplicationRevision>
     <UpdateEnabled>false</UpdateEnabled>
     <UpdateInterval>0</UpdateInterval>
@@ -148,6 +148,8 @@
     <Reference Include="System.Xml" />
     <Reference Include="System.Core" />
     <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
     <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="Microsoft.CSharp" />
@@ -272,7 +274,9 @@
       <DependentUpon>ThisAddIn.Designer.xml</DependentUpon>
     </Compile>
     <!-- Ribbon shell -->
-    <Compile Include="Ribbon\Ribbon1.cs" />
+    <Compile Include="Ribbon\Ribbon1.cs">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="Ribbon\Ribbon1.Designer.cs">
       <DependentUpon>Ribbon1.cs</DependentUpon>
       <SubType>Code</SubType>
@@ -281,13 +285,20 @@
     <Compile Include="Features\BatchReplace\BatchReplaceDialog.cs">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="Features\BatchReplace\BatchReplaceRibbonActions.cs" />
-    <Compile Include="Features\QuickTools\AutoNumberRibbonActions.cs" />
+    <Compile Include="Features\BatchReplace\BatchReplaceRibbonActions.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Features\QuickTools\AutoNumberRibbonActions.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="Features\DocumentInfo\DocumentBasicInfoForm.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="Features\DocumentInfo\DocumentBasicInfoItemEditForm.cs">
       <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Features\DocumentInfo\DocumentVersionManagement.cs">
+      <SubType>Code</SubType>
     </Compile>
     <Compile Include="Features\DocumentInfo\DocumentBasicInfoModels.cs">
       <SubType>Code</SubType>
@@ -295,11 +306,21 @@
     <Compile Include="Features\DocumentInfo\DocumentBasicInfoStore.cs">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="Features\DocumentCheck\DocumentCheckRibbonActions.cs" />
+    <Compile Include="Features\DocumentCheck\DocumentCheckRibbonActions.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="Features\DocumentCheck\DocumentCheckResultPaneControl.cs">
       <SubType>UserControl</SubType>
     </Compile>
-    <Compile Include="Features\Help\HelpRibbonActions.cs" />
+    <Compile Include="Features\Help\HelpRibbonActions.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Features\Help\PluginUpdateService.cs">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Features\Help\PluginUpdateForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Features\RequirementTracking\RequirementTrackingConsoleControl.cs">
       <SubType>UserControl</SubType>
     </Compile>
@@ -330,10 +351,18 @@
     <Compile Include="Features\Navigation\NavigationPaneControl.cs">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="Features\Captions\CaptionReferenceRibbonActions.cs" />
-    <Compile Include="Features\Captions\CaptionRibbonActions.cs" />
-    <Compile Include="Features\Navigation\NavigationRibbonActions.cs" />
-    <Compile Include="Features\Captions\CaptionRefreshRibbonActions.cs" />
+    <Compile Include="Features\Captions\CaptionReferenceRibbonActions.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Features\Captions\CaptionRibbonActions.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Features\Navigation\NavigationRibbonActions.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Features\Captions\CaptionRefreshRibbonActions.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="Features\Outline\OutlineListModels.cs">
       <SubType>Code</SubType>
     </Compile>
@@ -349,8 +378,12 @@
     <Compile Include="Features\Styles\StyleDefinitionRequest.cs">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="Features\Outline\OutlineRibbonActions.cs" />
-    <Compile Include="Features\QuickTools\QuickToolsRibbonActions.cs" />
+    <Compile Include="Features\Outline\OutlineRibbonActions.cs">
+      <SubType>Component</SubType>
+    </Compile>
+    <Compile Include="Features\QuickTools\QuickToolsRibbonActions.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="Features\QuickTools\SequenceFieldForm.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -360,7 +393,9 @@
     <Compile Include="Features\QuickTools\CommonPhrasesPaneControl.cs">
       <SubType>UserControl</SubType>
     </Compile>
-    <Compile Include="Features\TablesAndFigures\TablesAndFiguresRibbonActions.cs" />
+    <Compile Include="Features\TablesAndFigures\TablesAndFiguresRibbonActions.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="Features\TablesAndFigures\TableFormattingOptions.cs">
       <SubType>Code</SubType>
     </Compile>

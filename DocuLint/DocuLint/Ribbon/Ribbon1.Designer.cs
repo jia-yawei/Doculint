@@ -47,6 +47,7 @@ namespace DocuLint
             this.btnOpenCurrentFolder = this.Factory.CreateRibbonButton();
             this.btnSaveAllDocuments = this.Factory.CreateRibbonButton();
             this.btnCloseOtherDocuments = this.Factory.CreateRibbonButton();
+            this.btnDocumentVersions = this.Factory.CreateRibbonButton();
             this.group4 = this.Factory.CreateRibbonGroup();
             this.btnBatchReplace = this.Factory.CreateRibbonButton();
             this.btnOfficeClipboard = this.Factory.CreateRibbonButton();
@@ -82,6 +83,7 @@ namespace DocuLint
             this.btnCleanBlankPages = this.Factory.CreateRibbonButton();
             this.button18 = this.Factory.CreateRibbonButton();
             this.btnCommonPhrases = this.Factory.CreateRibbonButton();
+            this.btnStartDocumentCheck = this.Factory.CreateRibbonButton();
             this.btnToggleNavigationPane = this.Factory.CreateRibbonCheckBox();
             this.group3 = this.Factory.CreateRibbonGroup();
             this.button14 = this.Factory.CreateRibbonButton();
@@ -95,13 +97,6 @@ namespace DocuLint
             this.button9 = this.Factory.CreateRibbonButton();
             this.button10 = this.Factory.CreateRibbonButton();
             this.button11 = this.Factory.CreateRibbonButton();
-            this.groupDocumentCheck = this.Factory.CreateRibbonGroup();
-            this.chkNonBodyBlankLine = this.Factory.CreateRibbonCheckBox();
-            this.chkCaptionContinuity = this.Factory.CreateRibbonCheckBox();
-            this.chkListContinuity = this.Factory.CreateRibbonCheckBox();
-            this.chkStyleConsistency = this.Factory.CreateRibbonCheckBox();
-            this.chkBrokenReferences = this.Factory.CreateRibbonCheckBox();
-            this.btnStartDocumentCheck = this.Factory.CreateRibbonButton();
             this.groupSoftwareTools = this.Factory.CreateRibbonGroup();
             this.btnRequirementExtraction = this.Factory.CreateRibbonButton();
             this.button12 = this.Factory.CreateRibbonButton();
@@ -110,6 +105,7 @@ namespace DocuLint
             this.group8 = this.Factory.CreateRibbonGroup();
             this.menuHelp = this.Factory.CreateRibbonMenu();
             this.btnHelpVersion = this.Factory.CreateRibbonButton();
+            this.btnCheckUpdates = this.Factory.CreateRibbonButton();
             this.btnOpenHelpDocument = this.Factory.CreateRibbonButton();
             this.tab1.SuspendLayout();
             this.groupDocumentManage.SuspendLayout();
@@ -118,7 +114,6 @@ namespace DocuLint
             this.group6.SuspendLayout();
             this.group3.SuspendLayout();
             this.group7.SuspendLayout();
-            this.groupDocumentCheck.SuspendLayout();
             this.groupSoftwareTools.SuspendLayout();
             this.group8.SuspendLayout();
             this.SuspendLayout();
@@ -131,7 +126,6 @@ namespace DocuLint
             this.tab1.Groups.Add(this.group6);
             this.tab1.Groups.Add(this.group3);
             this.tab1.Groups.Add(this.group7);
-            this.tab1.Groups.Add(this.groupDocumentCheck);
             this.tab1.Groups.Add(this.groupSoftwareTools);
             this.tab1.Groups.Add(this.group8);
             this.tab1.Label = "搞快点";
@@ -143,6 +137,7 @@ namespace DocuLint
             this.groupDocumentManage.Items.Add(this.btnOpenCurrentFolder);
             this.groupDocumentManage.Items.Add(this.btnSaveAllDocuments);
             this.groupDocumentManage.Items.Add(this.btnCloseOtherDocuments);
+            this.groupDocumentManage.Items.Add(this.btnDocumentVersions);
             this.groupDocumentManage.Label = "文档管理";
             this.groupDocumentManage.Name = "groupDocumentManage";
             // 
@@ -178,7 +173,17 @@ namespace DocuLint
             this.btnCloseOtherDocuments.OfficeImageId = "WindowClose";
             this.btnCloseOtherDocuments.ShowImage = true;
             this.btnCloseOtherDocuments.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnCloseOtherDocuments_Click);
-            // 
+            //
+            // btnDocumentVersions
+            //
+            this.btnDocumentVersions.Label = "版本管理";
+            this.btnDocumentVersions.Name = "btnDocumentVersions";
+            this.btnDocumentVersions.OfficeImageId = "VersionHistory";
+            this.btnDocumentVersions.ScreenTip = "管理当前文档版本";
+            this.btnDocumentVersions.ShowImage = true;
+            this.btnDocumentVersions.SuperTip = "保存当前文档快照，查看历史版本及与当前版本的差异。";
+            this.btnDocumentVersions.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnDocumentVersions_Click);
+            //
             // group4
             // 
             this.group4.Items.Add(this.btnBatchReplace);
@@ -274,6 +279,7 @@ namespace DocuLint
             this.group6.Items.Add(this.splitButtonClean);
             this.group6.Items.Add(this.button18);
             this.group6.Items.Add(this.btnCommonPhrases);
+            this.group6.Items.Add(this.btnStartDocumentCheck);
             this.group6.Items.Add(this.btnToggleNavigationPane);
             this.group6.Label = "快速工具";
             this.group6.Name = "group6";
@@ -494,23 +500,29 @@ namespace DocuLint
             this.button18.OfficeImageId = "TableSplitTable";
             this.button18.ScreenTip = "按续表拆分";
             this.button18.ShowImage = true;
-            this.button18.SuperTip = "按 Word 原生拆分表格方式拆分当前表格，并在续表上方插入续表题注。";
+            this.button18.SuperTip = "先定位续表首行；可直接使用第一行作为表头，或手动选择原表表头。确认后自动拆分表格、复制表头并插入续表题注。";
             this.button18.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.button18_Click);
             // 
             // btnCommonPhrases
             // 
             this.btnCommonPhrases.Label = "常用语";
             this.btnCommonPhrases.Name = "btnCommonPhrases";
-            // QuickPartsInsert is not exposed consistently by all supported Word/WPS hosts.
-            // Paste is a stable built-in insert icon and remains recognizable for phrase insertion.
             this.btnCommonPhrases.OfficeImageId = "Paste";
             this.btnCommonPhrases.ScreenTip = "显示常用语";
             this.btnCommonPhrases.ShowImage = true;
             this.btnCommonPhrases.SuperTip = "打开常用语侧边栏，选择后插入当前光标位置。";
             this.btnCommonPhrases.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnCommonPhrases_Click);
             // 
+            // btnStartDocumentCheck
+            //
+            this.btnStartDocumentCheck.Label = "文档体检";
+            this.btnStartDocumentCheck.Name = "btnStartDocumentCheck";
+            this.btnStartDocumentCheck.OfficeImageId = "SpellingAndGrammar";
+            this.btnStartDocumentCheck.ShowImage = true;
+            this.btnStartDocumentCheck.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnStartDocumentCheck_Click);
+            //
             // btnToggleNavigationPane
-            // 
+            //
             this.btnToggleNavigationPane.Label = "导航窗格";
             this.btnToggleNavigationPane.Name = "btnToggleNavigationPane";
             this.btnToggleNavigationPane.ScreenTip = "显示或隐藏导航窗格";
@@ -612,50 +624,6 @@ namespace DocuLint
             this.button11.OfficeImageId = "FindDialog";
             this.button11.ShowImage = true;
             // 
-            // groupDocumentCheck
-            // 
-            this.groupDocumentCheck.Items.Add(this.chkNonBodyBlankLine);
-            this.groupDocumentCheck.Items.Add(this.chkCaptionContinuity);
-            this.groupDocumentCheck.Items.Add(this.chkListContinuity);
-            this.groupDocumentCheck.Items.Add(this.chkStyleConsistency);
-            this.groupDocumentCheck.Items.Add(this.chkBrokenReferences);
-            this.groupDocumentCheck.Items.Add(this.btnStartDocumentCheck);
-            this.groupDocumentCheck.Label = "文档检查";
-            this.groupDocumentCheck.Name = "groupDocumentCheck";
-            // 
-            // chkNonBodyBlankLine
-            // 
-            this.chkNonBodyBlankLine.Label = "章节标题为空";
-            this.chkNonBodyBlankLine.Name = "chkNonBodyBlankLine";
-            // 
-            // chkCaptionContinuity
-            // 
-            this.chkCaptionContinuity.Label = "题注连续性";
-            this.chkCaptionContinuity.Name = "chkCaptionContinuity";
-            // 
-            // chkListContinuity
-            // 
-            this.chkListContinuity.Label = "多级列表连续性";
-            this.chkListContinuity.Name = "chkListContinuity";
-            // 
-            // chkStyleConsistency
-            // 
-            this.chkStyleConsistency.Label = "样式一致性";
-            this.chkStyleConsistency.Name = "chkStyleConsistency";
-            // 
-            // chkBrokenReferences
-            // 
-            this.chkBrokenReferences.Label = "未更新域";
-            this.chkBrokenReferences.Name = "chkBrokenReferences";
-            // 
-            // btnStartDocumentCheck
-            // 
-            this.btnStartDocumentCheck.Label = "开始检查";
-            this.btnStartDocumentCheck.Name = "btnStartDocumentCheck";
-            this.btnStartDocumentCheck.OfficeImageId = "SpellingAndGrammar";
-            this.btnStartDocumentCheck.ShowImage = true;
-            this.btnStartDocumentCheck.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnStartDocumentCheck_Click);
-            // 
             // groupSoftwareTools
             // 
             this.groupSoftwareTools.DialogLauncher = ribbonDialogLauncherImpl3;
@@ -711,6 +679,7 @@ namespace DocuLint
             // menuHelp
             // 
             this.menuHelp.Items.Add(this.btnHelpVersion);
+            this.menuHelp.Items.Add(this.btnCheckUpdates);
             this.menuHelp.Items.Add(this.btnOpenHelpDocument);
             this.menuHelp.Label = "关于";
             this.menuHelp.Name = "menuHelp";
@@ -720,21 +689,28 @@ namespace DocuLint
             // btnHelpVersion
             // 
             this.btnHelpVersion.Enabled = false;
-            this.btnHelpVersion.Label = "版本号：0.0.1.6";
+            this.btnHelpVersion.Label = "版本号：0.0.1.7";
             this.btnHelpVersion.Name = "btnHelpVersion";
             this.btnHelpVersion.OfficeImageId = "Info";
             this.btnHelpVersion.ShowImage = true;
-            // 
+            //
+            // btnCheckUpdates
+            //
+            this.btnCheckUpdates.Label = "检查更新";
+            this.btnCheckUpdates.Name = "btnCheckUpdates";
+            this.btnCheckUpdates.OfficeImageId = "Refresh";
+            this.btnCheckUpdates.ShowImage = true;
+            //
             // btnOpenHelpDocument
-            // 
+            //
             this.btnOpenHelpDocument.Label = "打开帮助文档";
             this.btnOpenHelpDocument.Name = "btnOpenHelpDocument";
             this.btnOpenHelpDocument.OfficeImageId = "Help";
             this.btnOpenHelpDocument.ShowImage = true;
             this.btnOpenHelpDocument.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnOpenHelpDocument_Click);
-            // 
+            //
             // Ribbon1
-            // 
+            //
             this.Name = "Ribbon1";
             this.RibbonType = "Microsoft.Word.Document";
             this.Tabs.Add(this.tab1);
@@ -753,8 +729,6 @@ namespace DocuLint
             this.group3.PerformLayout();
             this.group7.ResumeLayout(false);
             this.group7.PerformLayout();
-            this.groupDocumentCheck.ResumeLayout(false);
-            this.groupDocumentCheck.PerformLayout();
             this.groupSoftwareTools.ResumeLayout(false);
             this.groupSoftwareTools.PerformLayout();
             this.group8.ResumeLayout(false);
@@ -780,6 +754,7 @@ namespace DocuLint
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnOpenCurrentFolder;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnSaveAllDocuments;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnCloseOtherDocuments;
+        internal Microsoft.Office.Tools.Ribbon.RibbonButton btnDocumentVersions;
         internal Microsoft.Office.Tools.Ribbon.RibbonGroup group6;
         internal Microsoft.Office.Tools.Ribbon.RibbonSplitButton splitButtonInsert;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnInsertTotalPages;
@@ -821,12 +796,6 @@ namespace DocuLint
         internal Microsoft.Office.Tools.Ribbon.RibbonButton button26;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton button14;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton button13;
-        internal Microsoft.Office.Tools.Ribbon.RibbonGroup groupDocumentCheck;
-        internal Microsoft.Office.Tools.Ribbon.RibbonCheckBox chkNonBodyBlankLine;
-        internal Microsoft.Office.Tools.Ribbon.RibbonCheckBox chkCaptionContinuity;
-        internal Microsoft.Office.Tools.Ribbon.RibbonCheckBox chkListContinuity;
-        internal Microsoft.Office.Tools.Ribbon.RibbonCheckBox chkStyleConsistency;
-        internal Microsoft.Office.Tools.Ribbon.RibbonCheckBox chkBrokenReferences;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnStartDocumentCheck;
         internal Microsoft.Office.Tools.Ribbon.RibbonGroup groupSoftwareTools;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnSoftwareDocumentCheck;
@@ -834,6 +803,7 @@ namespace DocuLint
         internal Microsoft.Office.Tools.Ribbon.RibbonGroup group8;
         internal Microsoft.Office.Tools.Ribbon.RibbonMenu menuHelp;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnHelpVersion;
+        internal Microsoft.Office.Tools.Ribbon.RibbonButton btnCheckUpdates;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnOpenHelpDocument;
     }
 
