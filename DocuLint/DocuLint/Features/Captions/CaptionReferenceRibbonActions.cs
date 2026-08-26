@@ -24,7 +24,8 @@ namespace DocuLint
             public int Start { get; set; }
             public Word.Paragraph Paragraph { get; set; }
             public string Text { get; set; }
-            public string BookmarkName { get; set; }
+            public string ReferenceType { get; set; }
+            public int ReferenceItem { get; set; }
         }
 
         private void button28_Click(object sender, RibbonControlEventArgs e)
@@ -80,7 +81,7 @@ namespace DocuLint
                     return;
                 }
 
-                InsertCaptionReferenceField(selection, target.BookmarkName, CaptionReferenceKind.Number);
+                InsertNativeCaptionReference(selection, target, CaptionReferenceKind.Number);
             }
             catch (Exception ex)
             {
@@ -124,14 +125,7 @@ namespace DocuLint
                     }
 
                     CaptionReferenceTarget target = targets[form.SelectedIndex];
-                    string bookmarkName = EnsureCaptionReferenceBookmark(doc, target.Paragraph, form.SelectedReferenceKind, null);
-                    if (string.IsNullOrWhiteSpace(bookmarkName))
-                    {
-                        MessageBox.Show("无法为所选题注创建引用。", "文档不加班");
-                        return;
-                    }
-
-                    InsertCaptionReferenceField(selection, bookmarkName, form.SelectedReferenceKind);
+                    InsertNativeCaptionReference(selection, target, form.SelectedReferenceKind);
                 }
             }
             catch (Exception ex)
@@ -148,6 +142,7 @@ namespace DocuLint
                 return targets;
             }
 
+            Dictionary<string, int> referenceItems = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (CaptionListEntry entry in CollectCaptionListEntries(doc))
             {
                 ThrowIfOperationCancelled();
@@ -157,18 +152,24 @@ namespace DocuLint
                     continue;
                 }
 
-                string bookmarkName = EnsureCaptionReferenceBookmark(doc, paragraph, CaptionReferenceKind.Number, null);
-                if (string.IsNullOrWhiteSpace(bookmarkName))
+                string referenceType = GetNativeCaptionReferenceType(entry.Text);
+                if (string.IsNullOrWhiteSpace(referenceType))
                 {
                     continue;
                 }
+
+                int referenceItem = referenceItems.TryGetValue(referenceType, out int currentItem)
+                    ? currentItem + 1
+                    : 1;
+                referenceItems[referenceType] = referenceItem;
 
                 targets.Add(new CaptionReferenceTarget
                 {
                     Start = paragraph.Range.Start,
                     Paragraph = paragraph,
                     Text = entry.Text,
-                    BookmarkName = bookmarkName
+                    ReferenceType = referenceType,
+                    ReferenceItem = referenceItem
                 });
             }
 
@@ -203,51 +204,143 @@ namespace DocuLint
             }
         }
 
-        private static void InsertCaptionReferenceField(
+        private static void InsertNativeCaptionReference(
             Word.Selection selection,
-            string bookmarkName,
+            CaptionReferenceTarget target,
             CaptionReferenceKind referenceKind)
         {
-            if (selection?.Range == null || string.IsNullOrWhiteSpace(bookmarkName))
+            if (selection?.Range == null
+                || target == null
+                || string.IsNullOrWhiteSpace(target.ReferenceType)
+                || target.ReferenceItem <= 0)
             {
                 return;
             }
 
             Word.Range insertRange = selection.Range.Duplicate;
-            Word.Range formatSourceRange = selection.Range.Duplicate;
-            Word.Field field = null;
-            try
-            {
-                field = insertRange.Fields.Add(
-                    insertRange,
-                    Word.WdFieldType.wdFieldEmpty,
-                    referenceKind == CaptionReferenceKind.PageNumber
-                        ? $" PAGEREF {bookmarkName} \\h "
-                        : $" REF {bookmarkName} \\h ",
-                    false);
-            }
-            catch
-            {
-                field = null;
-            }
-
-            if (field == null)
-            {
-                throw new InvalidOperationException("题注引用域插入失败。");
-            }
+            object referenceType = target.ReferenceType;
+            object referenceItem = target.ReferenceItem;
+            object insertAsHyperlink = true;
+            object includePosition = false;
+            object separateNumbers = false;
+            object separatorString = Type.Missing;
 
             try
             {
-                field.Update();
+                insertRange.InsertCrossReference(
+                    ref referenceType,
+                    ToNativeReferenceKind(referenceKind),
+                    ref referenceItem,
+                    ref insertAsHyperlink,
+                    ref includePosition,
+                    ref separateNumbers,
+                    ref separatorString);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Word 原生交叉引用插入失败：{ex.Message}", ex);
+            }
+
+            Word.Range insertedRange = insertRange;
+            if (insertedRange.End <= insertedRange.Start)
+            {
+                insertedRange = selection.Range.Duplicate;
+            }
+
+            try
+            {
+                ApplyCaptionReferenceFormatting(insertedRange);
             }
             catch
             {
             }
 
-            Word.Range endRange = field.Result?.Duplicate ?? insertRange;
-            TryApplyCharacterFormatting(formatSourceRange, endRange);
-            endRange.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
-            endRange.Select();
+            insertedRange.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
+            insertedRange.Select();
+        }
+
+        private static void ApplyCaptionReferenceFormatting(Word.Range targetRange)
+        {
+            if (targetRange?.Font == null)
+            {
+                return;
+            }
+
+            try
+            {
+                targetRange.Font.NameFarEast = "宋体";
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                targetRange.Font.NameAscii = "宋体";
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                targetRange.Font.NameOther = "宋体";
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                targetRange.Font.Name = "宋体";
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                targetRange.Font.Size = 12f;
+            }
+            catch
+            {
+            }
+        }
+
+        private static Word.WdReferenceKind ToNativeReferenceKind(CaptionReferenceKind referenceKind)
+        {
+            switch (referenceKind)
+            {
+                case CaptionReferenceKind.FullCaption:
+                    return Word.WdReferenceKind.wdEntireCaption;
+                case CaptionReferenceKind.PageNumber:
+                    return Word.WdReferenceKind.wdPageNumber;
+                default:
+                    return Word.WdReferenceKind.wdOnlyLabelAndNumber;
+            }
+        }
+
+        private static string GetNativeCaptionReferenceType(string captionText)
+        {
+            string normalized = NormalizeCaptionParagraphText(captionText);
+            Match match = CaptionPrefixRegex.Match(normalized ?? string.Empty);
+            if (!match.Success)
+            {
+                return null;
+            }
+
+            string prefix = match.Groups["prefix"].Value.Trim();
+            if (string.Equals(prefix, "Figure", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Figure";
+            }
+
+            if (string.Equals(prefix, "Table", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Table";
+            }
+
+            return prefix;
         }
 
         private static void TryApplyCharacterFormatting(Word.Range sourceRange, Word.Range targetRange)

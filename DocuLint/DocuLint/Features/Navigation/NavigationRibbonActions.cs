@@ -78,7 +78,9 @@ namespace DocuLint
                     }
 
                     string name = (bookmark.Name ?? string.Empty).Trim();
-                    if (string.IsNullOrWhiteSpace(name) || name.StartsWith("\\", StringComparison.Ordinal))
+                    if (string.IsNullOrWhiteSpace(name)
+                        || name.StartsWith("\\", StringComparison.Ordinal)
+                        || IsInternalBookmarkName(name))
                     {
                         continue;
                     }
@@ -99,6 +101,21 @@ namespace DocuLint
                 .GroupBy(entry => new { entry.Start, entry.Text })
                 .Select(group => group.First())
                 .ToList();
+        }
+
+        private static bool IsInternalBookmarkName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return true;
+            }
+
+            return name.StartsWith("DocuLintCaptionRef_", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("DocuLintTrace_", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("_Ref", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("_Toc", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("_Hlk", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(name, "_GoBack", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

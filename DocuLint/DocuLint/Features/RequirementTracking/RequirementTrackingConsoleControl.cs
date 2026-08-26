@@ -156,7 +156,13 @@ namespace DocuLint
 
             lblTraceTemplate = CreateToolbarLabel("追踪模板");
             ConfigureOptionLabel(lblTraceTemplate);
-            cmbTraceTemplate = CreateComboBox("SRS ↔ SDS", "SDS ↔ SDD", "自定义");
+            cmbTraceTemplate = CreateComboBox(
+                "SRS ↔ SDS",
+                "SRS ↔ SSS",
+                "SRS ↔ SDTD",
+                "SDS ↔ SDD",
+                "自定义");
+            cmbTraceTemplate.Width = 120;
             ConfigureOptionComboBox(cmbTraceTemplate);
             cmbTraceTemplate.SelectedIndexChanged += (_, __) => OnTraceTemplateChanged();
 
@@ -480,7 +486,10 @@ namespace DocuLint
             else
             {
                 forwardSource = PickSnapshotForPrefix("SRS") ?? currentDocumentSnapshot;
-                forwardTarget = PickSnapshotForPrefix("SDS") ?? externalTargetSnapshot;
+                string targetPrefix = template == RequirementTraceTemplate.SrsToSss
+                    ? "SSS"
+                    : template == RequirementTraceTemplate.SrsToSdtd ? "SDTD" : "SDS";
+                forwardTarget = PickSnapshotForPrefix(targetPrefix) ?? externalTargetSnapshot;
             }
 
             sourceSnapshot = reverseTrace ? forwardTarget : forwardSource;
@@ -1456,9 +1465,27 @@ namespace DocuLint
                 }
 
                 string template = (string)session.Attribute("template") ?? string.Empty;
-                int templateIndex = string.Equals(template, "SdsToSdd", StringComparison.OrdinalIgnoreCase)
-                    ? 1
-                    : string.Equals(template, "Custom", StringComparison.OrdinalIgnoreCase) ? 2 : 0;
+                int templateIndex;
+                if (string.Equals(template, "SrsToSss", StringComparison.OrdinalIgnoreCase))
+                {
+                    templateIndex = 1;
+                }
+                else if (string.Equals(template, "SrsToSdtd", StringComparison.OrdinalIgnoreCase))
+                {
+                    templateIndex = 2;
+                }
+                else if (string.Equals(template, "SdsToSdd", StringComparison.OrdinalIgnoreCase))
+                {
+                    templateIndex = 3;
+                }
+                else if (string.Equals(template, "Custom", StringComparison.OrdinalIgnoreCase))
+                {
+                    templateIndex = 4;
+                }
+                else
+                {
+                    templateIndex = 0;
+                }
                 suppressTraceTemplateChanged = true;
                 try
                 {
@@ -1644,6 +1671,10 @@ namespace DocuLint
         {
             switch (GetCurrentTraceTemplate())
             {
+                case RequirementTraceTemplate.SrsToSss:
+                    return "SrsToSss";
+                case RequirementTraceTemplate.SrsToSdtd:
+                    return "SrsToSdtd";
                 case RequirementTraceTemplate.SdsToSdd:
                     return "SdsToSdd";
                 case RequirementTraceTemplate.Custom:
@@ -2553,8 +2584,12 @@ namespace DocuLint
             switch (cmbTraceTemplate.SelectedIndex)
             {
                 case 1:
-                    return RequirementTraceTemplate.SdsToSdd;
+                    return RequirementTraceTemplate.SrsToSss;
                 case 2:
+                    return RequirementTraceTemplate.SrsToSdtd;
+                case 3:
+                    return RequirementTraceTemplate.SdsToSdd;
+                case 4:
                     return RequirementTraceTemplate.Custom;
                 default:
                     return RequirementTraceTemplate.SrsToSds;
@@ -2600,8 +2635,27 @@ namespace DocuLint
                 return string.Empty;
             }
 
-            string forwardPrefix = template == RequirementTraceTemplate.SdsToSdd ? "SDS" : "SRS";
-            string reversePrefix = template == RequirementTraceTemplate.SdsToSdd ? "SDD" : "SDS";
+            string forwardPrefix;
+            string reversePrefix;
+            switch (template)
+            {
+                case RequirementTraceTemplate.SdsToSdd:
+                    forwardPrefix = "SDS";
+                    reversePrefix = "SDD";
+                    break;
+                case RequirementTraceTemplate.SrsToSss:
+                    forwardPrefix = "SRS";
+                    reversePrefix = "SSS";
+                    break;
+                case RequirementTraceTemplate.SrsToSdtd:
+                    forwardPrefix = "SRS";
+                    reversePrefix = "SDTD";
+                    break;
+                default:
+                    forwardPrefix = "SRS";
+                    reversePrefix = "SDS";
+                    break;
+            }
             return reverseTrace ? reversePrefix : forwardPrefix;
         }
 
@@ -2613,8 +2667,27 @@ namespace DocuLint
                 return string.Empty;
             }
 
-            string forwardPrefix = template == RequirementTraceTemplate.SdsToSdd ? "SDD" : "SDS";
-            string reversePrefix = template == RequirementTraceTemplate.SdsToSdd ? "SDS" : "SRS";
+            string forwardPrefix;
+            string reversePrefix;
+            switch (template)
+            {
+                case RequirementTraceTemplate.SdsToSdd:
+                    forwardPrefix = "SDD";
+                    reversePrefix = "SDS";
+                    break;
+                case RequirementTraceTemplate.SrsToSss:
+                    forwardPrefix = "SSS";
+                    reversePrefix = "SRS";
+                    break;
+                case RequirementTraceTemplate.SrsToSdtd:
+                    forwardPrefix = "SDTD";
+                    reversePrefix = "SRS";
+                    break;
+                default:
+                    forwardPrefix = "SDS";
+                    reversePrefix = "SRS";
+                    break;
+            }
             return reverseTrace ? reversePrefix : forwardPrefix;
         }
 
@@ -2640,6 +2713,14 @@ namespace DocuLint
                 case RequirementTraceTemplate.SdsToSdd:
                     forwardSource = "软件概要设计说明";
                     forwardTarget = "软件详细设计说明";
+                    break;
+                case RequirementTraceTemplate.SrsToSss:
+                    forwardSource = "软件需求规格说明";
+                    forwardTarget = "系统规格说明";
+                    break;
+                case RequirementTraceTemplate.SrsToSdtd:
+                    forwardSource = "软件需求规格说明";
+                    forwardTarget = "软件研制任务书";
                     break;
                 default:
                     forwardSource = "软件需求规格说明";

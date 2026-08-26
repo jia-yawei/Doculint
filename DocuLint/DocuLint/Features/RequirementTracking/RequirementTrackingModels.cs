@@ -8,7 +8,9 @@ namespace DocuLint
         SdsToSrs = 1,
         SdsToSdd = 2,
         SddToSds = 3,
-        Custom = 4
+        Custom = 4,
+        SrsToSss = 5,
+        SrsToSdtd = 6
     }
 
     internal enum RequirementTrackingDocumentKind

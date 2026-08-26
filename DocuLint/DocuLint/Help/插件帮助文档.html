@@ -352,7 +352,7 @@
       <ol>
         <li>先在参与追踪的文档中完成需求提取并保存。</li>
         <li>打开保存追踪关系的文档，点击 <strong>需求追踪</strong>。</li>
-        <li>选择 <code>SRS ↔ SDS</code>、<code>SDS ↔ SDD</code> 或 <strong>自定义</strong> 模板。</li>
+        <li>选择 <code>SRS ↔ SDS</code>、<code>SRS ↔ SSS</code>、<code>SRS ↔ SDTD</code>、<code>SDS ↔ SDD</code> 或 <strong>自定义</strong> 模板。</li>
         <li>按模板需要导入互追文档，然后在左侧选择源需求，在右侧勾选目标需求。</li>
         <li>需要从相反方向检查时点击 <strong>反向追踪</strong>，已有关系不会被删除。</li>
         <li>逐条完成映射后，点击 <strong>导出追踪表</strong>。</li>
@@ -405,6 +405,8 @@
         <thead><tr><th>模板</th><th>文档方式</th><th>默认方向</th><th>导入互追文档</th></tr></thead>
         <tbody>
           <tr><td><code>SRS ↔ SDS</code></td><td>通常为需求文档与设计文档两份文档</td><td>左侧 SRS，右侧 SDS</td><td>需要。插件会根据已保存标识识别哪份文档包含 SRS、哪份包含 SDS。</td></tr>
+          <tr><td><code>SRS ↔ SSS</code></td><td>需求规格说明与系统规格说明两份文档</td><td>左侧 SRS，右侧 SSS</td><td>需要。右侧只显示 SSS 标识。</td></tr>
+          <tr><td><code>SRS ↔ SDTD</code></td><td>需求规格说明与软件研制任务书两份文档</td><td>左侧 SRS，右侧 SDTD</td><td>需要。右侧只显示 SDTD 标识。</td></tr>
           <tr><td><code>SDS ↔ SDD</code></td><td>同一份设计文档</td><td>左侧 SDS，右侧 SDD</td><td>不需要。两类标识都从当前设计文档读取。</td></tr>
           <tr><td>自定义</td><td>当前文档与另一份文档</td><td>由左表头和右表头定义</td><td>需要。可手动输入两侧表头名称。</td></tr>
         </tbody>

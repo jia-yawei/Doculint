@@ -1,8 +1,8 @@
 {
   "Version": "0.0.1.7",
-  "ReleaseDate": "2026-08-21",
-  "Notes": "修复更新下载与安装问题，增加下载进度显示，并优化更新源选择。",
+  "ReleaseDate": "2026-08-26",
+  "Notes": "优化需求追踪与样式绑定，修复追踪表和总页码问题，并调整功能区显示。",
   "PackageUrl": "https://raw.githubusercontent.com/jia-yawei/Doculint/main/update/DocuLint-0.0.1.7-setup.exe",
   "PackageFileName": "DocuLint-0.0.1.7-setup.exe",
-  "Sha256": "91E202CF72296EC0E848D1EFFA20572485D59F956D1538E3080ED3ADED633519"
+  "Sha256": "8CC3EF8881C3533B93D10E36460BCB9D69CF92641E63C03F736B3CB420EECE8A"
 }

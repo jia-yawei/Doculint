@@ -28,6 +28,7 @@ namespace DocuLint
             MinimizeBox = false;
             ShowInTaskbar = false;
             AutoScaleMode = AutoScaleMode.Dpi;
+            AutoScaleDimensions = new SizeF(96F, 96F);
             Font = new Font("Microsoft YaHei UI", 9F);
             ClientSize = new Size(560, 245);
 
@@ -46,7 +47,7 @@ namespace DocuLint
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             Label title = new Label
             {

@@ -43,7 +43,7 @@ namespace DocuLint
             Microsoft.Office.Tools.Ribbon.RibbonDialogLauncher ribbonDialogLauncherImpl3 = this.Factory.CreateRibbonDialogLauncher();
             this.tab1 = this.Factory.CreateRibbonTab();
             this.groupDocumentManage = this.Factory.CreateRibbonGroup();
-            this.btnSwitchWindows = this.Factory.CreateRibbonButton();
+            this.btnSwitchWindows = this.Factory.CreateRibbonMenu();
             this.btnOpenCurrentFolder = this.Factory.CreateRibbonButton();
             this.btnSaveAllDocuments = this.Factory.CreateRibbonButton();
             this.btnCloseOtherDocuments = this.Factory.CreateRibbonButton();
@@ -118,9 +118,9 @@ namespace DocuLint
             this.groupSoftwareTools.SuspendLayout();
             this.group8.SuspendLayout();
             this.SuspendLayout();
-            // 
+            //
             // tab1
-            // 
+            //
             this.tab1.Groups.Add(this.groupDocumentManage);
             this.tab1.Groups.Add(this.group4);
             this.tab1.Groups.Add(this.group1);
@@ -131,9 +131,9 @@ namespace DocuLint
             this.tab1.Groups.Add(this.group8);
             this.tab1.Label = "搞快点";
             this.tab1.Name = "tab1";
-            // 
+            //
             // groupDocumentManage
-            // 
+            //
             this.groupDocumentManage.Items.Add(this.btnSwitchWindows);
             this.groupDocumentManage.Items.Add(this.btnOpenCurrentFolder);
             this.groupDocumentManage.Items.Add(this.btnSaveAllDocuments);
@@ -141,34 +141,35 @@ namespace DocuLint
             this.groupDocumentManage.Items.Add(this.btnDocumentVersions);
             this.groupDocumentManage.Label = "文档管理";
             this.groupDocumentManage.Name = "groupDocumentManage";
-            // 
+            //
             // btnSwitchWindows
-            // 
+            //
             this.btnSwitchWindows.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeLarge;
+            this.btnSwitchWindows.Dynamic = true;
             this.btnSwitchWindows.Label = "切换窗口";
             this.btnSwitchWindows.Name = "btnSwitchWindows";
             this.btnSwitchWindows.OfficeImageId = "WindowSwitchWindowsMenuWord";
             this.btnSwitchWindows.ShowImage = true;
-            this.btnSwitchWindows.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnSwitchWindows_Click);
-            // 
+            this.btnSwitchWindows.ItemsLoading += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnSwitchWindows_ItemsLoading);
+            //
             // btnOpenCurrentFolder
-            // 
+            //
             this.btnOpenCurrentFolder.Label = "打开所在文件夹";
             this.btnOpenCurrentFolder.Name = "btnOpenCurrentFolder";
             this.btnOpenCurrentFolder.OfficeImageId = "FileOpen";
             this.btnOpenCurrentFolder.ShowImage = true;
             this.btnOpenCurrentFolder.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnOpenCurrentFolder_Click);
-            // 
+            //
             // btnSaveAllDocuments
-            // 
+            //
             this.btnSaveAllDocuments.Label = "保存所有文档";
             this.btnSaveAllDocuments.Name = "btnSaveAllDocuments";
             this.btnSaveAllDocuments.OfficeImageId = "FileSave";
             this.btnSaveAllDocuments.ShowImage = true;
             this.btnSaveAllDocuments.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnSaveAllDocuments_Click);
-            // 
+            //
             // btnCloseOtherDocuments
-            // 
+            //
             this.btnCloseOtherDocuments.Label = "关闭其他文档";
             this.btnCloseOtherDocuments.Name = "btnCloseOtherDocuments";
             this.btnCloseOtherDocuments.OfficeImageId = "WindowClose";
@@ -182,6 +183,7 @@ namespace DocuLint
             this.btnDocumentVersions.OfficeImageId = "VersionHistory";
             this.btnDocumentVersions.ScreenTip = "管理当前文档版本";
             this.btnDocumentVersions.ShowImage = true;
+            this.btnDocumentVersions.Visible = false;
             this.btnDocumentVersions.SuperTip = "保存当前文档快照，查看历史版本及与当前版本的差异。";
             this.btnDocumentVersions.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnDocumentVersions_Click);
             //
@@ -511,9 +513,10 @@ namespace DocuLint
             this.btnCommonPhrases.OfficeImageId = "Paste";
             this.btnCommonPhrases.ScreenTip = "显示常用语";
             this.btnCommonPhrases.ShowImage = true;
+            this.btnCommonPhrases.Visible = false;
             this.btnCommonPhrases.SuperTip = "打开常用语侧边栏，选择后插入当前光标位置；候选补全快捷键可在插件配置中设置。";
             this.btnCommonPhrases.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnCommonPhrases_Click);
-            // 
+            //
             // btnStartDocumentCheck
             //
             this.btnStartDocumentCheck.Label = "文档体检";
@@ -691,7 +694,7 @@ namespace DocuLint
             // btnHelpVersion
             // 
             this.btnHelpVersion.Enabled = false;
-            this.btnHelpVersion.Label = "版本号：0.0.1.8";
+            this.btnHelpVersion.Label = "版本号：0.0.1.7";
             this.btnHelpVersion.Name = "btnHelpVersion";
             this.btnHelpVersion.OfficeImageId = "Info";
             this.btnHelpVersion.ShowImage = true;
@@ -718,6 +721,7 @@ namespace DocuLint
             this.btnPluginSettings.OfficeImageId = "Settings";
             this.btnPluginSettings.ScreenTip = "插件配置";
             this.btnPluginSettings.ShowImage = true;
+            this.btnPluginSettings.Visible = false;
             this.btnPluginSettings.SuperTip = "配置常用语补全、图片题注和表格题注快捷键。";
             this.btnPluginSettings.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnPluginSettings_Click);
             //
@@ -762,7 +766,7 @@ namespace DocuLint
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnBatchReplace;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnOfficeClipboard;
         internal Microsoft.Office.Tools.Ribbon.RibbonToggleButton btnStyleBrush;
-        internal Microsoft.Office.Tools.Ribbon.RibbonButton btnSwitchWindows;
+        internal Microsoft.Office.Tools.Ribbon.RibbonMenu btnSwitchWindows;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnOpenCurrentFolder;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnSaveAllDocuments;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnCloseOtherDocuments;

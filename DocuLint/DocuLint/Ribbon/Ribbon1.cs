@@ -14,7 +14,6 @@ using Word = Microsoft.Office.Interop.Word;
 namespace DocuLint
 {
     // Word 工具栏（Ribbon）功能类：快速应用文档样式
-    [DesignerCategory("Code")]
     public partial class Ribbon1
     {
         private static readonly List<Ribbon1> LoadedInstances = new List<Ribbon1>();
@@ -90,113 +89,6 @@ namespace DocuLint
             internal string Title { get; set; }
         }
 
-        private sealed class WordWindowPickerForm : Form
-        {
-            internal IntPtr SelectedHandle { get; private set; }
-
-            internal bool CloseRequested { get; private set; }
-
-            internal WordWindowPickerForm(IReadOnlyList<WordWindowItem> windows)
-            {
-                Text = "切换窗口";
-                ShowInTaskbar = false;
-                FormBorderStyle = FormBorderStyle.FixedSingle;
-                MaximizeBox = false;
-                MinimizeBox = false;
-                StartPosition = FormStartPosition.Manual;
-                Font = new System.Drawing.Font("Microsoft YaHei UI", 9F);
-                BackColor = System.Drawing.Color.White;
-                AutoScaleMode = AutoScaleMode.Dpi;
-
-                int contentWidth = 420;
-                using (System.Drawing.Graphics graphics = CreateGraphics())
-                {
-                    foreach (WordWindowItem item in windows)
-                    {
-                        int measured = (int)Math.Ceiling(graphics.MeasureString(item.Title ?? string.Empty, Font).Width) + 78;
-                        contentWidth = Math.Max(contentWidth, Math.Min(measured, 820));
-                    }
-                }
-
-                TableLayoutPanel list = new TableLayoutPanel
-                {
-                    Dock = DockStyle.Fill,
-                    ColumnCount = 1,
-                    RowCount = windows.Count,
-                    AutoScroll = windows.Count > 10,
-                    Padding = new Padding(6),
-                    BackColor = System.Drawing.Color.White
-                };
-
-                for (int i = 0; i < windows.Count; i++)
-                {
-                    WordWindowItem window = windows[i];
-                    list.RowStyles.Add(new RowStyle(SizeType.Absolute, 38F));
-                    TableLayoutPanel row = new TableLayoutPanel
-                    {
-                        Dock = DockStyle.Top,
-                        Height = 38,
-                        ColumnCount = 2,
-                        Margin = new Padding(0),
-                        BackColor = i % 2 == 0
-                            ? System.Drawing.Color.White
-                            : System.Drawing.Color.FromArgb(248, 249, 251)
-                    };
-                    row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 38F));
-                    row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-
-                    Button closeButton = new Button
-                    {
-                        Dock = DockStyle.Fill,
-                        Text = "×",
-                        FlatStyle = FlatStyle.Flat,
-                        Margin = new Padding(2),
-                        ForeColor = System.Drawing.Color.FromArgb(90, 96, 106),
-                        BackColor = System.Drawing.Color.Transparent,
-                        Cursor = Cursors.Hand,
-                        TabStop = false
-                    };
-                    closeButton.FlatAppearance.BorderSize = 0;
-                    closeButton.FlatAppearance.MouseOverBackColor = System.Drawing.Color.FromArgb(250, 226, 226);
-                    closeButton.Click += (_, __) => SelectWindow(window.Handle, true);
-
-                    Button documentButton = new Button
-                    {
-                        Dock = DockStyle.Fill,
-                        Text = (i + 1) + " " + window.Title,
-                        TextAlign = System.Drawing.ContentAlignment.MiddleLeft,
-                        AutoEllipsis = true,
-                        FlatStyle = FlatStyle.Flat,
-                        Margin = new Padding(0, 2, 2, 2),
-                        BackColor = System.Drawing.Color.Transparent,
-                        Cursor = Cursors.Hand
-                    };
-                    documentButton.FlatAppearance.BorderSize = 0;
-                    documentButton.FlatAppearance.MouseOverBackColor = System.Drawing.Color.FromArgb(232, 241, 253);
-                    documentButton.Click += (_, __) => SelectWindow(window.Handle, false);
-
-                    row.Controls.Add(closeButton, 0, 0);
-                    row.Controls.Add(documentButton, 1, 0);
-                    list.Controls.Add(row, 0, i);
-                }
-
-                ClientSize = new System.Drawing.Size(contentWidth, Math.Min(windows.Count * 38 + 12, 400));
-                Controls.Add(list);
-
-                System.Drawing.Rectangle workArea = Screen.FromPoint(Cursor.Position).WorkingArea;
-                int x = Math.Min(Cursor.Position.X, workArea.Right - Width);
-                int y = Math.Min(Cursor.Position.Y, workArea.Bottom - Height);
-                Location = new System.Drawing.Point(Math.Max(workArea.Left, x), Math.Max(workArea.Top, y));
-            }
-
-            private void SelectWindow(IntPtr handle, bool closeRequested)
-            {
-                SelectedHandle = handle;
-                CloseRequested = closeRequested;
-                DialogResult = DialogResult.OK;
-                Close();
-            }
-        }
         private sealed class WordPerformanceScope : IDisposable
         {
             private readonly Word.Application app;
@@ -316,30 +208,46 @@ namespace DocuLint
             }
         }
 
-        private void btnSwitchWindows_Click(object sender, RibbonControlEventArgs e)
+        private void btnSwitchWindows_ItemsLoading(object sender, RibbonControlEventArgs e)
         {
+            btnSwitchWindows.Items.Clear();
             List<WordWindowItem> windows = GetOpenWordWindows();
             if (windows.Count == 0)
             {
-                MessageBox.Show("当前没有打开的 Word 文档。", "文档管理");
+                RibbonButton empty = Factory.CreateRibbonButton();
+                empty.Label = "没有打开的 Word 文档";
+                empty.Enabled = false;
+                btnSwitchWindows.Items.Add(empty);
                 return;
             }
 
-            using (WordWindowPickerForm picker = new WordWindowPickerForm(windows))
+            for (int i = 0; i < windows.Count; i++)
             {
-                if (picker.ShowDialog() != DialogResult.OK || picker.SelectedHandle == IntPtr.Zero)
-                {
-                    return;
-                }
+                WordWindowItem window = windows[i];
+                RibbonMenu item = Factory.CreateRibbonMenu();
+                item.Name = "btnSwitchWindowDoc" + i.ToString();
+                item.Label = (i + 1) + "  " + window.Title;
+                item.OfficeImageId = "FileDocument";
+                item.ShowImage = true;
+                item.ItemSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeRegular;
 
-                if (picker.CloseRequested)
-                {
-                    CloseWordDocumentWindow(picker.SelectedHandle);
-                }
-                else
-                {
-                    ActivateWordDocumentWindow(picker.SelectedHandle);
-                }
+                RibbonButton activateButton = Factory.CreateRibbonButton();
+                activateButton.Name = "btnActivateWindow" + i.ToString();
+                activateButton.Label = "切换到此文档";
+                activateButton.OfficeImageId = "WindowSwitchWindowsMenuWord";
+                activateButton.ShowImage = true;
+                activateButton.Click += (_, __) => ActivateWordDocumentWindow(window.Handle);
+
+                RibbonButton closeButton = Factory.CreateRibbonButton();
+                closeButton.Name = "btnCloseWindow" + i.ToString();
+                closeButton.Label = "关闭此文档";
+                closeButton.OfficeImageId = "WindowClose";
+                closeButton.ShowImage = true;
+                closeButton.Click += (_, __) => CloseWordDocumentWindow(window.Handle);
+
+                item.Items.Add(activateButton);
+                item.Items.Add(closeButton);
+                btnSwitchWindows.Items.Add(item);
             }
         }
 
@@ -1064,8 +972,9 @@ namespace DocuLint
                     commonStylesDropDown.Items.Clear();
                     if (doc != null)
                     {
-                        foreach (string styleName in GetConfiguredCommonStyleNames()
-                            .Where(styleName => DocumentContainsStyle(doc, styleName)))
+                        // 常用样式是插件级配置，不应因为切换文档或 Word 的样式索引
+                        // 偶发解析失败而从下拉框消失。真正应用前仍会校验当前文档样式。
+                        foreach (string styleName in GetConfiguredCommonStyleNames())
                         {
                             RibbonDropDownItem item = Factory.CreateRibbonDropDownItem();
                             item.Label = styleName;

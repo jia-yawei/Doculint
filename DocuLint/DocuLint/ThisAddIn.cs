@@ -1083,6 +1083,15 @@ namespace DocuLint
             StopRequirementExtractionAutoAdd();
             StopRequirementQuickAddPopup();
             HideRequirementQuickAddPopup();
+            // 文档切换时光标可能没有发生移动，主动刷新样式下拉框，
+            // 避免已保存的常用样式必须再次打开面板并点击保存才显示。
+            try
+            {
+                Ribbon1.RefreshAllStyleIndicators();
+            }
+            catch
+            {
+            }
             RefreshNavigationPaneState();
             ScheduleNavigationPaneStateRefresh();
             if (IsRequirementExtractionPaneVisible())

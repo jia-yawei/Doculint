@@ -275,7 +275,7 @@
     </Compile>
     <!-- Ribbon shell -->
     <Compile Include="Ribbon\Ribbon1.cs">
-      <SubType>Code</SubType>
+      <SubType>Component</SubType>
     </Compile>
     <Compile Include="Ribbon\Ribbon1.Designer.cs">
       <DependentUpon>Ribbon1.cs</DependentUpon>
@@ -397,7 +397,9 @@
     <Compile Include="Features\QuickTools\CommonPhrasesPaneControl.cs">
       <SubType>UserControl</SubType>
     </Compile>
-    <Compile Include="Features\QuickTools\CommonPhraseSuggestionForm.cs" />
+    <Compile Include="Features\QuickTools\CommonPhraseSuggestionForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Features\TablesAndFigures\TablesAndFiguresRibbonActions.cs">
       <SubType>Component</SubType>
     </Compile>
