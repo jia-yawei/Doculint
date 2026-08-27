@@ -74,14 +74,19 @@ namespace DocuLint
         internal static PluginUpdateManifest LoadFromGitHub(out string error)
         {
             StringBuilder errors = new StringBuilder();
+            PluginUpdateManifest newestManifest = null;
             foreach (string manifestUrl in DefaultManifestUrls)
             {
                 string sourceError;
                 PluginUpdateManifest manifest = LoadFromGitHub(manifestUrl, out sourceError);
                 if (manifest != null)
                 {
-                    error = string.Empty;
-                    return manifest;
+                    if (newestManifest == null || manifest.ParsedVersion > newestManifest.ParsedVersion)
+                    {
+                        newestManifest = manifest;
+                    }
+
+                    continue;
                 }
 
                 if (!string.IsNullOrWhiteSpace(sourceError))
@@ -95,6 +100,12 @@ namespace DocuLint
                 }
             }
 
+            if (newestManifest != null)
+            {
+                error = string.Empty;
+                return newestManifest;
+            }
+
             error = errors.ToString();
             return null;
         }
@@ -106,7 +117,7 @@ namespace DocuLint
             {
                 using (WebClient client = CreateClient())
                 {
-                    PluginUpdateManifest manifest = ReadManifest(client.DownloadString(manifestUrl));
+                    PluginUpdateManifest manifest = ReadManifest(client.DownloadString(AddCacheBuster(manifestUrl)));
                     if (manifest == null)
                     {
                         error = "GitHub 更新清单格式无效。";
@@ -269,6 +280,11 @@ namespace DocuLint
             client.Headers[HttpRequestHeader.UserAgent] = "DocuLint-UpdateClient/1.0";
             client.Encoding = Encoding.UTF8;
             return client;
+        }
+
+        private static string AddCacheBuster(string url)
+        {
+            return url + (url.IndexOf('?') >= 0 ? "&" : "?") + "v=" + DateTime.UtcNow.Ticks;
         }
 
         private sealed class TimeoutWebClient : WebClient
