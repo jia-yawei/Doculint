@@ -39,8 +39,8 @@ namespace DocuLint
             RawGitHubContentPrefix + "update/latest.json",
             JsDelivrContentPrefix + "update/latest.json"
         };
-        private const int ConnectionTimeoutMilliseconds = 10000;
-        private const int ReadWriteTimeoutMilliseconds = 30000;
+        private const int ConnectionTimeoutMilliseconds = 30000;
+        private const int ReadWriteTimeoutMilliseconds = 600000;
 
         static PluginUpdateService()
         {
