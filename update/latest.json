@@ -2,7 +2,7 @@
   "Version": "0.0.1.7",
   "ReleaseDate": "2026-08-26",
   "Notes": "优化需求追踪与样式绑定，修复追踪表和总页码问题，并调整功能区显示。",
-  "PackageUrl": "https://raw.githubusercontent.com/jia-yawei/Doculint/main/update/DocuLint-0.0.1.7-setup.exe",
+  "PackageUrl": "https://github.com/jia-yawei/Doculint/releases/download/v0.0.1.7/DocuLint-0.0.1.7-setup.exe",
   "PackageFileName": "DocuLint-0.0.1.7-setup.exe",
   "Sha256": "8CC3EF8881C3533B93D10E36460BCB9D69CF92641E63C03F736B3CB420EECE8A"
 }
