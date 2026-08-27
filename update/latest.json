@@ -2,7 +2,7 @@
   "Version": "0.0.1.7",
   "ReleaseDate": "2026-08-27",
   "Notes": "修复独立安装包无法覆盖旧版加载项注册的问题，优化在线更新下载与本地更新流程。",
-  "PackageUrl": "https://cdn.jsdelivr.net/gh/jia-yawei/Doculint-update@main/DocuLint-0.0.1.7-setup.bin",
+  "PackageUrl": "https://raw.githubusercontent.com/jia-yawei/Doculint/main/update/DocuLint-0.0.1.7-setup.exe",
   "PackageFileName": "DocuLint-0.0.1.7-setup.exe",
-  "Sha256": "BAE6AEA2B4C5706C36DF21CCAB1DA48CBD68BD7ED74B29A59E46430B46661747"
+  "Sha256": "A451E4520F0A421DD4084AABF409A3A03C95CD660E37EDDBE5488107637C9578"
 }

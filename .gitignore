@@ -58,7 +58,6 @@ TestResults/
 test_*.ps1
 node_cache/
 tmp/*
-update/*.exe
 .codex-session/history/
 .codex-session/session-brief.local.md
 .codex-session/last-read.txt

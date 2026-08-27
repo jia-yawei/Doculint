@@ -30,14 +30,9 @@ namespace DocuLint
     {
         private const string RawGitHubContentPrefix =
             "https://raw.githubusercontent.com/jia-yawei/Doculint/main/";
-        private const string JsDelivrContentPrefix =
-            "https://cdn.jsdelivr.net/gh/jia-yawei/Doculint@main/";
-        private const string GitHubReleasePrefix = "https://github.com/";
-        private const string GhFastPrefix = "https://ghfast.top/";
         private static readonly string[] DefaultManifestUrls =
         {
-            RawGitHubContentPrefix + "update/latest.json",
-            JsDelivrContentPrefix + "update/latest.json"
+            RawGitHubContentPrefix + "update/latest.json"
         };
         private const int ConnectionTimeoutMilliseconds = 30000;
         private const int ReadWriteTimeoutMilliseconds = 600000;
@@ -242,41 +237,6 @@ namespace DocuLint
 
         private static string[] GetPackageUrls(string packageUrl)
         {
-            if (packageUrl.StartsWith(GhFastPrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                string originalUrl = packageUrl.Substring(GhFastPrefix.Length);
-                return originalUrl.StartsWith(GitHubReleasePrefix, StringComparison.OrdinalIgnoreCase)
-                    ? new[] { packageUrl, originalUrl }
-                    : new[] { packageUrl };
-            }
-
-            if (packageUrl.StartsWith(GitHubReleasePrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                return new[]
-                {
-                    GhFastPrefix + packageUrl,
-                    packageUrl
-                };
-            }
-
-            if (packageUrl.StartsWith(RawGitHubContentPrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                return new[]
-                {
-                    JsDelivrContentPrefix + packageUrl.Substring(RawGitHubContentPrefix.Length),
-                    packageUrl
-                };
-            }
-
-            if (packageUrl.StartsWith(JsDelivrContentPrefix, StringComparison.OrdinalIgnoreCase))
-            {
-                return new[]
-                {
-                    packageUrl,
-                    RawGitHubContentPrefix + packageUrl.Substring(JsDelivrContentPrefix.Length)
-                };
-            }
-
             return new[] { packageUrl };
         }
 
