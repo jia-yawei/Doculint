@@ -1,8 +1,8 @@
 {
-  "Version": "0.0.2.0",
+  "Version": "0.0.1.7",
   "ReleaseDate": "2026-08-27",
-  "Notes": "恢复版本管理、常用语和插件配置入口；优化网络更新与本地更新流程，修复网络异常时检查更新可能卡顿的问题。",
-  "PackageUrl": "https://cdn.jsdelivr.net/gh/jia-yawei/Doculint-update@main/DocuLint-0.0.2.0-setup.bin",
-  "PackageFileName": "DocuLint-0.0.2.0-setup.exe",
-  "Sha256": "B6CB02426315BBD8A879B6A1BCCC4EE8030E4C63E2F5AECFB43DDCD6B3F58316"
+  "Notes": "修复独立安装包无法覆盖旧版加载项注册的问题，优化在线更新下载与本地更新流程。",
+  "PackageUrl": "https://cdn.jsdelivr.net/gh/jia-yawei/Doculint-update@main/DocuLint-0.0.1.7-setup.bin",
+  "PackageFileName": "DocuLint-0.0.1.7-setup.exe",
+  "Sha256": "BAE6AEA2B4C5706C36DF21CCAB1DA48CBD68BD7ED74B29A59E46430B46661747"
 }
