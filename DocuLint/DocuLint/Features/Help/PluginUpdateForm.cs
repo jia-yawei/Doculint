@@ -89,11 +89,11 @@ namespace DocuLint
             layout.Controls.Add(modePanel, 1, 2);
             layout.SetColumnSpan(modePanel, 2);
 
-            layout.Controls.Add(new Label { Text = "本地升级包", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 3);
+            layout.Controls.Add(new Label { Text = "本地升级目录", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 3);
             localPackageBox = new TextBox { Dock = DockStyle.Fill, Text = GetLocalPackage() };
             layout.Controls.Add(localPackageBox, 1, 3);
             browsePackageButton = new Button { Text = "浏览...", AutoSize = true, Dock = DockStyle.Fill };
-            browsePackageButton.Click += (_, __) => BrowseLocalPackage();
+            browsePackageButton.Click += (_, __) => BrowseLocalPackageDirectory();
             layout.Controls.Add(browsePackageButton, 2, 3);
 
             Panel statusPanel = new Panel
@@ -186,18 +186,19 @@ namespace DocuLint
 
         internal bool FoundNewVersion => latestManifest != null && latestManifest.ParsedVersion > PluginUpdateService.CurrentVersion;
 
-        private void BrowseLocalPackage()
+        private void BrowseLocalPackageDirectory()
         {
-            using (OpenFileDialog dialog = new OpenFileDialog
+            using (FolderBrowserDialog dialog = new FolderBrowserDialog
             {
-                Title = "选择本地升级包",
-                Filter = "安装包 (*.exe;*.msi)|*.exe;*.msi|所有文件 (*.*)|*.*",
-                FileName = localPackageBox.Text
+                Description = "选择包含 DocuLint 升级安装包的文件夹",
+                SelectedPath = Directory.Exists(localPackageBox.Text)
+                    ? localPackageBox.Text
+                    : string.Empty
             })
             {
                 if (dialog.ShowDialog(this) == DialogResult.OK)
                 {
-                    localPackageBox.Text = dialog.FileName;
+                    localPackageBox.Text = dialog.SelectedPath;
                     SaveSettings();
                 }
             }
@@ -231,7 +232,7 @@ namespace DocuLint
             statusHeadingLabel.Text = "正在检查更新";
             versionSummaryLabel.Text = "当前版本 " + PluginUpdateService.CurrentVersionText;
             statusLabel.Text = useLocalUpdate
-                ? "正在检查本地升级包，请稍候..."
+                ? "正在检查本地升级目录，请稍候..."
                 : "正在连接更新服务，请稍候...";
             installButton.Enabled = false;
             checkButton.Enabled = false;
@@ -242,9 +243,9 @@ namespace DocuLint
                 {
                     string error = string.Empty;
                     PluginUpdateManifest manifest = useLocalUpdate
-                        ? PluginUpdateService.LoadFromPackage(localPackage, out error)
+                        ? PluginUpdateService.LoadFromPackageDirectory(localPackage, out error)
                         : PluginUpdateService.LoadFromGitHub(out error);
-                    return Tuple.Create(manifest, error, useLocalUpdate ? "本地升级包" : "网络更新");
+                    return Tuple.Create(manifest, error, useLocalUpdate ? "本地升级目录" : "网络更新");
                 });
 
                 if (IsDisposed)
@@ -260,7 +261,7 @@ namespace DocuLint
                 {
                     statusHeadingLabel.Text = "检查更新失败";
                     versionSummaryLabel.Text = "当前版本 " + PluginUpdateService.CurrentVersionText;
-                    statusLabel.Text = (useLocalUpdate ? "本地升级包不可用。" : "未找到可用更新源。")
+                    statusLabel.Text = (useLocalUpdate ? "本地升级目录中未找到可用安装包。" : "未找到可用更新源。")
                         + (string.IsNullOrWhiteSpace(localError) ? string.Empty : "\r\n" + localError);
                     return;
                 }
@@ -307,8 +308,7 @@ namespace DocuLint
             }
 
             updateInProgress = true;
-            bool useLocalUpdate = latestSource == "本地升级包";
-            string localPackage = localPackageBox.Text.Trim();
+            bool useLocalUpdate = latestSource == "本地升级目录";
             installButton.Enabled = false;
             checkButton.Enabled = false;
             cancelButton.Enabled = false;
@@ -325,7 +325,7 @@ namespace DocuLint
             {
                 string error = string.Empty;
                 string packagePath = useLocalUpdate
-                    ? localPackage
+                    ? latestManifest.PackageUrl
                     : PluginUpdateService.DownloadPackage(
                         latestManifest,
                         Path.Combine(Path.GetTempPath(), "DocuLint-updates"),

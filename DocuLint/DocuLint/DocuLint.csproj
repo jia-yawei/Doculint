@@ -36,7 +36,7 @@
     <IsWebBootstrapper>False</IsWebBootstrapper>
     <BootstrapperEnabled>true</BootstrapperEnabled>
     <BootstrapperComponentsLocation>Relative</BootstrapperComponentsLocation>
-    <PublishUrl>E:\my_VSTO\搞快点发布\</PublishUrl>
+    <PublishUrl>bin\Release\app.publish\</PublishUrl>
     <InstallUrl />
     <TargetCulture>zh-chs</TargetCulture>
     <ApplicationVersion>0.0.2.0</ApplicationVersion>

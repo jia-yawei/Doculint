@@ -32,6 +32,8 @@ namespace DocuLint
             "https://raw.githubusercontent.com/jia-yawei/Doculint/main/";
         private const string JsDelivrContentPrefix =
             "https://cdn.jsdelivr.net/gh/jia-yawei/Doculint@main/";
+        private const string GitHubReleasePrefix = "https://github.com/";
+        private const string GhFastPrefix = "https://ghfast.top/";
         private static readonly string[] DefaultManifestUrls =
         {
             RawGitHubContentPrefix + "update/latest.json",
@@ -138,38 +140,46 @@ namespace DocuLint
             return DownloadPackage(manifest, targetFolder, null, out error);
         }
 
-        internal static PluginUpdateManifest LoadFromPackage(string packagePath, out string error)
+        internal static PluginUpdateManifest LoadFromPackageDirectory(string directoryPath, out string error)
         {
             error = string.Empty;
-            if (string.IsNullOrWhiteSpace(packagePath) || !File.Exists(packagePath))
+            if (string.IsNullOrWhiteSpace(directoryPath) || !Directory.Exists(directoryPath))
             {
-                error = "请先选择存在的本地升级包。";
+                error = "请先选择存在的本地升级目录。";
                 return null;
             }
 
-            string extension = Path.GetExtension(packagePath);
-            if (!string.Equals(extension, ".exe", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(extension, ".msi", StringComparison.OrdinalIgnoreCase))
+            string selectedPath = null;
+            Version selectedVersion = null;
+            foreach (string packagePath in Directory.GetFiles(directoryPath, "DocuLint-*-setup.exe", SearchOption.TopDirectoryOnly))
             {
-                error = "本地升级包必须是 .exe 或 .msi 文件。";
-                return null;
+                Match versionMatch = Regex.Match(
+                    Path.GetFileNameWithoutExtension(packagePath),
+                    @"(?<!\d)(\d+\.\d+\.\d+(?:\.\d+)?)(?!\d)");
+                if (!versionMatch.Success || !Version.TryParse(versionMatch.Groups[1].Value, out Version version))
+                {
+                    continue;
+                }
+
+                if (selectedVersion == null || version > selectedVersion)
+                {
+                    selectedPath = packagePath;
+                    selectedVersion = version;
+                }
             }
 
-            Match versionMatch = Regex.Match(
-                Path.GetFileNameWithoutExtension(packagePath),
-                @"(?<!\d)(\d+\.\d+\.\d+(?:\.\d+)?)(?!\d)");
-            if (!versionMatch.Success || !Version.TryParse(versionMatch.Groups[1].Value, out Version version))
+            if (selectedPath == null)
             {
-                error = "无法识别本地升级包版本，请选择文件名包含版本号的安装包。";
+                error = "目录中未找到 DocuLint-版本号-setup.exe 格式的升级包。";
                 return null;
             }
 
             return new PluginUpdateManifest
             {
-                Version = version.ToString(),
-                PackageUrl = packagePath,
-                PackageFileName = Path.GetFileName(packagePath),
-                Notes = "已选择本地升级包。"
+                Version = selectedVersion.ToString(),
+                PackageUrl = selectedPath,
+                PackageFileName = Path.GetFileName(selectedPath),
+                Notes = "已从本地升级目录中选择最新安装包。"
             };
         }
 
@@ -232,6 +242,23 @@ namespace DocuLint
 
         private static string[] GetPackageUrls(string packageUrl)
         {
+            if (packageUrl.StartsWith(GhFastPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                string originalUrl = packageUrl.Substring(GhFastPrefix.Length);
+                return originalUrl.StartsWith(GitHubReleasePrefix, StringComparison.OrdinalIgnoreCase)
+                    ? new[] { packageUrl, originalUrl }
+                    : new[] { packageUrl };
+            }
+
+            if (packageUrl.StartsWith(GitHubReleasePrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return new[]
+                {
+                    GhFastPrefix + packageUrl,
+                    packageUrl
+                };
+            }
+
             if (packageUrl.StartsWith(RawGitHubContentPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 return new[]
