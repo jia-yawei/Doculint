@@ -3,6 +3,7 @@ using System.IO;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Web.Script.Serialization;
 
 namespace DocuLint
@@ -27,9 +28,17 @@ namespace DocuLint
 
     internal static class PluginUpdateService
     {
-        internal const string DefaultGitHubManifestUrl =
-            "https://raw.githubusercontent.com/jia-yawei/Doculint/main/update/latest.json";
-        internal const string ManifestFileName = "latest.json";
+        private const string RawGitHubContentPrefix =
+            "https://raw.githubusercontent.com/jia-yawei/Doculint/main/";
+        private const string JsDelivrContentPrefix =
+            "https://cdn.jsdelivr.net/gh/jia-yawei/Doculint@main/";
+        private static readonly string[] DefaultManifestUrls =
+        {
+            JsDelivrContentPrefix + "update/latest.json",
+            RawGitHubContentPrefix + "update/latest.json"
+        };
+        private const int ConnectionTimeoutMilliseconds = 10000;
+        private const int ReadWriteTimeoutMilliseconds = 30000;
 
         static PluginUpdateService()
         {
@@ -62,7 +71,35 @@ namespace DocuLint
             }
         }
 
-        internal static PluginUpdateManifest LoadFromGitHub(string manifestUrl, out string error)
+        internal static PluginUpdateManifest LoadFromGitHub(out string error)
+        {
+            StringBuilder errors = new StringBuilder();
+            foreach (string manifestUrl in DefaultManifestUrls)
+            {
+                string sourceError;
+                PluginUpdateManifest manifest = LoadFromGitHub(manifestUrl, out sourceError);
+                if (manifest != null)
+                {
+                    error = string.Empty;
+                    return manifest;
+                }
+
+                if (!string.IsNullOrWhiteSpace(sourceError))
+                {
+                    if (errors.Length > 0)
+                    {
+                        errors.AppendLine();
+                    }
+
+                    errors.Append(sourceError);
+                }
+            }
+
+            error = errors.ToString();
+            return null;
+        }
+
+        private static PluginUpdateManifest LoadFromGitHub(string manifestUrl, out string error)
         {
             error = string.Empty;
             try
@@ -85,61 +122,44 @@ namespace DocuLint
             }
         }
 
-        internal static PluginUpdateManifest LoadFromFolder(string folder, out string error)
-        {
-            error = string.Empty;
-            try
-            {
-                string path = Path.Combine(folder ?? string.Empty, ManifestFileName);
-                if (!File.Exists(path))
-                {
-                    error = "文件夹中未找到 latest.json。";
-                    return null;
-                }
-
-                PluginUpdateManifest manifest = ReadManifest(File.ReadAllText(path, Encoding.UTF8));
-                if (manifest == null)
-                {
-                    error = "更新清单格式无效。";
-                }
-
-                return manifest;
-            }
-            catch (Exception ex)
-            {
-                error = ex.Message;
-                return null;
-            }
-        }
-
-        internal static string ResolvePackagePath(PluginUpdateManifest manifest, string localFolder)
-        {
-            if (manifest == null)
-            {
-                return null;
-            }
-
-            if (!string.IsNullOrWhiteSpace(localFolder))
-            {
-                string packageName = manifest.PackageFileName;
-                if (string.IsNullOrWhiteSpace(packageName) && !string.IsNullOrWhiteSpace(manifest.PackageUrl))
-                {
-                    packageName = Path.GetFileName(manifest.PackageUrl);
-                }
-
-                string localPath = Path.Combine(localFolder, packageName ?? string.Empty);
-                if (File.Exists(localPath))
-                {
-                    return localPath;
-                }
-            }
-
-            return null;
-        }
-
         internal static string DownloadPackage(PluginUpdateManifest manifest, string targetFolder, out string error)
         {
             return DownloadPackage(manifest, targetFolder, null, out error);
+        }
+
+        internal static PluginUpdateManifest LoadFromPackage(string packagePath, out string error)
+        {
+            error = string.Empty;
+            if (string.IsNullOrWhiteSpace(packagePath) || !File.Exists(packagePath))
+            {
+                error = "请先选择存在的本地升级包。";
+                return null;
+            }
+
+            string extension = Path.GetExtension(packagePath);
+            if (!string.Equals(extension, ".exe", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(extension, ".msi", StringComparison.OrdinalIgnoreCase))
+            {
+                error = "本地升级包必须是 .exe 或 .msi 文件。";
+                return null;
+            }
+
+            Match versionMatch = Regex.Match(
+                Path.GetFileNameWithoutExtension(packagePath),
+                @"(?<!\d)(\d+\.\d+\.\d+(?:\.\d+)?)(?!\d)");
+            if (!versionMatch.Success || !Version.TryParse(versionMatch.Groups[1].Value, out Version version))
+            {
+                error = "无法识别本地升级包版本，请选择文件名包含版本号的安装包。";
+                return null;
+            }
+
+            return new PluginUpdateManifest
+            {
+                Version = version.ToString(),
+                PackageUrl = packagePath,
+                PackageFileName = Path.GetFileName(packagePath),
+                Notes = "已选择本地升级包。"
+            };
         }
 
         internal static string DownloadPackage(
@@ -155,45 +175,33 @@ namespace DocuLint
                 return null;
             }
 
-            try
+            foreach (string packageUrl in GetPackageUrls(manifest.PackageUrl))
             {
-                Directory.CreateDirectory(targetFolder);
-                string name = string.IsNullOrWhiteSpace(manifest.PackageFileName)
-                    ? Path.GetFileName(new Uri(manifest.PackageUrl).LocalPath)
-                    : manifest.PackageFileName;
-                string target = Path.Combine(targetFolder, string.IsNullOrWhiteSpace(name) ? "DocuLint-update.vsto" : name);
-                using (WebClient client = CreateClient())
-                using (Stream input = client.OpenRead(manifest.PackageUrl))
-                using (FileStream output = File.Create(target))
+                try
                 {
-                    long totalBytes = -1;
-                    long.TryParse(client.ResponseHeaders[HttpResponseHeader.ContentLength], out totalBytes);
-                    long receivedBytes = 0;
-                    byte[] buffer = new byte[64 * 1024];
-                    int read;
-                    progress?.Invoke(0, totalBytes);
-                    while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+                    Directory.CreateDirectory(targetFolder);
+                    string name = string.IsNullOrWhiteSpace(manifest.PackageFileName)
+                        ? Path.GetFileName(new Uri(packageUrl).LocalPath)
+                        : manifest.PackageFileName;
+                    string target = Path.Combine(targetFolder, string.IsNullOrWhiteSpace(name) ? "DocuLint-update.vsto" : name);
+                    DownloadPackageFile(packageUrl, target, progress);
+
+                    if (!VerifySha256(target, manifest.Sha256))
                     {
-                        output.Write(buffer, 0, read);
-                        receivedBytes += read;
-                        progress?.Invoke(receivedBytes, totalBytes);
+                        File.Delete(target);
+                        error = "安装包 SHA-256 校验失败。";
+                        continue;
                     }
-                }
 
-                if (!VerifySha256(target, manifest.Sha256))
+                    return target;
+                }
+                catch (Exception ex)
                 {
-                    File.Delete(target);
-                    error = "安装包 SHA-256 校验失败。";
-                    return null;
+                    error = ex.Message;
                 }
+            }
 
-                return target;
-            }
-            catch (Exception ex)
-            {
-                error = ex.Message;
-                return null;
-            }
+            return null;
         }
 
         internal static bool VerifySha256(string path, string expected)
@@ -211,12 +219,73 @@ namespace DocuLint
             }
         }
 
+        private static string[] GetPackageUrls(string packageUrl)
+        {
+            if (packageUrl.StartsWith(RawGitHubContentPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return new[]
+                {
+                    JsDelivrContentPrefix + packageUrl.Substring(RawGitHubContentPrefix.Length),
+                    packageUrl
+                };
+            }
+
+            if (packageUrl.StartsWith(JsDelivrContentPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return new[]
+                {
+                    packageUrl,
+                    RawGitHubContentPrefix + packageUrl.Substring(JsDelivrContentPrefix.Length)
+                };
+            }
+
+            return new[] { packageUrl };
+        }
+
+        private static void DownloadPackageFile(string packageUrl, string target, Action<long, long> progress)
+        {
+            using (WebClient client = CreateClient())
+            using (Stream input = client.OpenRead(packageUrl))
+            using (FileStream output = File.Create(target))
+            {
+                long totalBytes = -1;
+                long.TryParse(client.ResponseHeaders[HttpResponseHeader.ContentLength], out totalBytes);
+                long receivedBytes = 0;
+                byte[] buffer = new byte[64 * 1024];
+                int read;
+                progress?.Invoke(0, totalBytes);
+                while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    output.Write(buffer, 0, read);
+                    receivedBytes += read;
+                    progress?.Invoke(receivedBytes, totalBytes);
+                }
+            }
+        }
+
         private static WebClient CreateClient()
         {
-            WebClient client = new WebClient();
+            WebClient client = new TimeoutWebClient();
             client.Headers[HttpRequestHeader.UserAgent] = "DocuLint-UpdateClient/1.0";
             client.Encoding = Encoding.UTF8;
             return client;
+        }
+
+        private sealed class TimeoutWebClient : WebClient
+        {
+            protected override WebRequest GetWebRequest(Uri address)
+            {
+                WebRequest request = base.GetWebRequest(address);
+                request.Timeout = ConnectionTimeoutMilliseconds;
+
+                HttpWebRequest httpRequest = request as HttpWebRequest;
+                if (httpRequest != null)
+                {
+                    httpRequest.ReadWriteTimeout = ReadWriteTimeoutMilliseconds;
+                }
+
+                return request;
+            }
         }
     }
 }

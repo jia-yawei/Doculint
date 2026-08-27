@@ -22,7 +22,7 @@
     <Setting Name="ChapterNumberRepairFormatting" Type="System.String" Scope="User">
       <Value Profile="(Default)" />
     </Setting>
-    <Setting Name="UpdateLocalFolder" Type="System.String" Scope="User">
+    <Setting Name="UpdateLocalPackage" Type="System.String" Scope="User">
       <Value Profile="(Default)" />
     </Setting>
   </Settings>

@@ -9,7 +9,10 @@ namespace DocuLint
 {
     internal sealed class PluginUpdateForm : Form
     {
-        private readonly TextBox localFolderBox;
+        private readonly RadioButton networkUpdateRadio;
+        private readonly RadioButton localUpdateRadio;
+        private readonly TextBox localPackageBox;
+        private readonly Button browsePackageButton;
         private readonly Label statusHeadingLabel;
         private readonly Label versionSummaryLabel;
         private readonly Label statusLabel;
@@ -17,6 +20,7 @@ namespace DocuLint
         private readonly Button installButton;
         private readonly Button checkButton;
         private readonly Button cancelButton;
+        private bool updateCheckInProgress;
         private bool updateInProgress;
         private PluginUpdateManifest latestManifest;
         private string latestSource;
@@ -31,19 +35,18 @@ namespace DocuLint
             ShowInTaskbar = false;
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = new Font("Microsoft YaHei UI", 9F);
-            ClientSize = new Size(640, 420);
+            ClientSize = new Size(640, 390);
 
             TableLayoutPanel layout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 3,
-                RowCount = 7,
+                RowCount = 6,
                 Padding = new Padding(16)
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 148F));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92F));
-            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -64,22 +67,34 @@ namespace DocuLint
             layout.Controls.Add(new Label { Text = "当前版本", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 1);
             layout.Controls.Add(new Label { Text = PluginUpdateService.CurrentVersionText, AutoSize = true, Anchor = AnchorStyles.Left }, 1, 1);
 
-            layout.Controls.Add(new Label { Text = "GitHub 更新源", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 2);
-            Label githubSourceLabel = new Label
+            layout.Controls.Add(new Label { Text = "更新方式", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 2);
+            FlowLayoutPanel modePanel = new FlowLayoutPanel
             {
-                Text = "已内置（Doculint 官方仓库）",
                 AutoSize = true,
-                Anchor = AnchorStyles.Left,
-                ForeColor = Color.FromArgb(75, 82, 95)
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                Margin = new Padding(0, 2, 0, 2)
             };
-            layout.Controls.Add(githubSourceLabel, 1, 2);
+            networkUpdateRadio = new RadioButton
+            {
+                Text = "网络更新",
+                AutoSize = true,
+                Checked = true,
+                Margin = new Padding(0, 0, 20, 0)
+            };
+            localUpdateRadio = new RadioButton { Text = "本地更新", AutoSize = true };
+            modePanel.Controls.Add(networkUpdateRadio);
+            modePanel.Controls.Add(localUpdateRadio);
+            layout.Controls.Add(modePanel, 1, 2);
+            layout.SetColumnSpan(modePanel, 2);
 
-            layout.Controls.Add(new Label { Text = "指定文件夹", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 3);
-            localFolderBox = new TextBox { Dock = DockStyle.Fill, Text = GetLocalFolder() };
-            layout.Controls.Add(localFolderBox, 1, 3);
-            Button browseButton = new Button { Text = "选择...", AutoSize = true, Dock = DockStyle.Fill };
-            browseButton.Click += (_, __) => BrowseLocalFolder();
-            layout.Controls.Add(browseButton, 2, 3);
+            layout.Controls.Add(new Label { Text = "本地升级包", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 3);
+            localPackageBox = new TextBox { Dock = DockStyle.Fill, Text = GetLocalPackage() };
+            layout.Controls.Add(localPackageBox, 1, 3);
+            browsePackageButton = new Button { Text = "浏览...", AutoSize = true, Dock = DockStyle.Fill };
+            browsePackageButton.Click += (_, __) => BrowseLocalPackage();
+            layout.Controls.Add(browsePackageButton, 2, 3);
 
             Panel statusPanel = new Panel
             {
@@ -151,7 +166,7 @@ namespace DocuLint
             buttons.Controls.Add(installButton);
             buttons.Controls.Add(checkButton);
             buttons.Controls.Add(cancelButton);
-            layout.Controls.Add(buttons, 0, 6);
+            layout.Controls.Add(buttons, 0, 5);
             layout.SetColumnSpan(buttons, 3);
             Controls.Add(layout);
             AcceptButton = checkButton;
@@ -159,6 +174,10 @@ namespace DocuLint
 
             installButton.Tag = "install";
             Tag = installButton;
+            networkUpdateRadio.CheckedChanged += (_, __) => UpdateModeControls();
+            localUpdateRadio.CheckedChanged += (_, __) => UpdateModeControls();
+            localPackageBox.TextChanged += (_, __) => UpdateModeControls();
+            UpdateModeControls();
             Shown += (_, __) =>
             {
                 SaveSettings();
@@ -167,70 +186,117 @@ namespace DocuLint
 
         internal bool FoundNewVersion => latestManifest != null && latestManifest.ParsedVersion > PluginUpdateService.CurrentVersion;
 
-        private void BrowseLocalFolder()
+        private void BrowseLocalPackage()
         {
-            using (FolderBrowserDialog dialog = new FolderBrowserDialog { SelectedPath = localFolderBox.Text })
+            using (OpenFileDialog dialog = new OpenFileDialog
+            {
+                Title = "选择本地升级包",
+                Filter = "安装包 (*.exe;*.msi)|*.exe;*.msi|所有文件 (*.*)|*.*",
+                FileName = localPackageBox.Text
+            })
             {
                 if (dialog.ShowDialog(this) == DialogResult.OK)
                 {
-                    localFolderBox.Text = dialog.SelectedPath;
+                    localPackageBox.Text = dialog.FileName;
                     SaveSettings();
                 }
             }
         }
 
-        private void CheckForUpdates()
+        private void UpdateModeControls()
         {
+            bool useLocalUpdate = localUpdateRadio.Checked;
+            localPackageBox.Enabled = useLocalUpdate;
+            browsePackageButton.Enabled = useLocalUpdate;
+            if (!updateCheckInProgress && !updateInProgress)
+            {
+                checkButton.Enabled = !useLocalUpdate || !string.IsNullOrWhiteSpace(localPackageBox.Text);
+            }
+        }
+
+        private async void CheckForUpdates()
+        {
+            if (updateCheckInProgress || updateInProgress)
+            {
+                return;
+            }
+
+            updateCheckInProgress = true;
             SaveSettings();
             latestManifest = null;
             latestSource = null;
+            string localPackage = localPackageBox.Text.Trim();
+            bool useLocalUpdate = localUpdateRadio.Checked;
             updateProgressBar.Visible = false;
             statusHeadingLabel.Text = "正在检查更新";
             versionSummaryLabel.Text = "当前版本 " + PluginUpdateService.CurrentVersionText;
-            statusLabel.Text = string.IsNullOrWhiteSpace(localFolderBox.Text)
-                ? "正在连接 GitHub，请稍候..."
-                : "正在读取指定文件夹，请稍候...";
+            statusLabel.Text = useLocalUpdate
+                ? "正在检查本地升级包，请稍候..."
+                : "正在连接更新服务，请稍候...";
             installButton.Enabled = false;
-            Application.DoEvents();
+            checkButton.Enabled = false;
 
-            string localError = string.Empty;
-            PluginUpdateManifest selected = null;
-            if (string.IsNullOrWhiteSpace(localFolderBox.Text))
+            try
             {
-                selected = PluginUpdateService.LoadFromGitHub(
-                    PluginUpdateService.DefaultGitHubManifestUrl,
-                    out localError);
-                latestSource = "GitHub";
-            }
-            else
-            {
-                selected = PluginUpdateService.LoadFromFolder(localFolderBox.Text.Trim(), out localError);
-                latestSource = "指定文件夹";
-            }
+                Tuple<PluginUpdateManifest, string, string> result = await Task.Run(() =>
+                {
+                    string error = string.Empty;
+                    PluginUpdateManifest manifest = useLocalUpdate
+                        ? PluginUpdateService.LoadFromPackage(localPackage, out error)
+                        : PluginUpdateService.LoadFromGitHub(out error);
+                    return Tuple.Create(manifest, error, useLocalUpdate ? "本地升级包" : "网络更新");
+                });
 
-            if (selected == null)
-            {
-                statusHeadingLabel.Text = "检查更新失败";
-                versionSummaryLabel.Text = "当前版本 " + PluginUpdateService.CurrentVersionText;
-                statusLabel.Text = "未找到可用更新源。" + (string.IsNullOrWhiteSpace(localError) ? string.Empty : "\r\n" + localError);
-                return;
-            }
+                if (IsDisposed)
+                {
+                    return;
+                }
 
-            latestManifest = selected;
-            if (latestManifest == null || latestManifest.ParsedVersion <= PluginUpdateService.CurrentVersion)
-            {
-                statusHeadingLabel.Text = "无需更新";
-                versionSummaryLabel.Text = "当前版本 " + PluginUpdateService.CurrentVersionText;
-                statusLabel.Text = "当前已是最新版本。";
-                installButton.Enabled = false;
-                return;
-            }
+                PluginUpdateManifest selected = result.Item1;
+                string localError = result.Item2;
+                latestSource = result.Item3;
 
-            statusHeadingLabel.Text = "发现新版本";
-            versionSummaryLabel.Text = "当前版本 " + PluginUpdateService.CurrentVersionText
-                + "    最新版本 " + latestManifest.Version;
-            statusLabel.Text = "来源：" + latestSource + "\r\n" + (latestManifest.Notes ?? "暂无更新说明。");
-            installButton.Enabled = true;
+                if (selected == null)
+                {
+                    statusHeadingLabel.Text = "检查更新失败";
+                    versionSummaryLabel.Text = "当前版本 " + PluginUpdateService.CurrentVersionText;
+                    statusLabel.Text = (useLocalUpdate ? "本地升级包不可用。" : "未找到可用更新源。")
+                        + (string.IsNullOrWhiteSpace(localError) ? string.Empty : "\r\n" + localError);
+                    return;
+                }
+
+                latestManifest = selected;
+                if (latestManifest.ParsedVersion <= PluginUpdateService.CurrentVersion)
+                {
+                    statusHeadingLabel.Text = "无需更新";
+                    versionSummaryLabel.Text = "当前版本 " + PluginUpdateService.CurrentVersionText;
+                    statusLabel.Text = "当前已是最新版本。";
+                    installButton.Enabled = false;
+                    return;
+                }
+
+                statusHeadingLabel.Text = "发现新版本";
+                versionSummaryLabel.Text = "当前版本 " + PluginUpdateService.CurrentVersionText
+                    + "    最新版本 " + latestManifest.Version;
+                statusLabel.Text = "来源：" + latestSource + "\r\n" + (latestManifest.Notes ?? "暂无更新说明。");
+                installButton.Enabled = true;
+            }
+            catch (Exception ex)
+            {
+                if (!IsDisposed)
+                {
+                    statusHeadingLabel.Text = "检查更新失败";
+                    statusLabel.Text = "检查更新时发生错误：" + ex.Message;
+                }
+            }
+            finally
+            {
+                updateCheckInProgress = false;
+                if (!IsDisposed)
+                {
+                    UpdateModeControls();
+                }
+            }
         }
 
         private void InstallUpdate()
@@ -241,21 +307,25 @@ namespace DocuLint
             }
 
             updateInProgress = true;
+            bool useLocalUpdate = latestSource == "本地升级包";
+            string localPackage = localPackageBox.Text.Trim();
             installButton.Enabled = false;
             checkButton.Enabled = false;
             cancelButton.Enabled = false;
-            statusHeadingLabel.Text = "正在下载更新";
+            statusHeadingLabel.Text = useLocalUpdate ? "正在准备安装" : "正在下载更新";
             versionSummaryLabel.Text = "最新版本 " + latestManifest.Version;
-            statusLabel.Text = "正在下载安装包，请稍候... Word 仍可正常使用。";
+            statusLabel.Text = useLocalUpdate
+                ? "正在启动本地升级包，请稍候..."
+                : "正在下载安装包，请稍候... Word 仍可正常使用。";
             updateProgressBar.Style = ProgressBarStyle.Continuous;
             updateProgressBar.Value = 0;
-            updateProgressBar.Visible = true;
+            updateProgressBar.Visible = !useLocalUpdate;
 
             Task.Run(() =>
             {
                 string error = string.Empty;
-                string packagePath = latestSource == "指定文件夹"
-                    ? PluginUpdateService.ResolvePackagePath(latestManifest, localFolderBox.Text.Trim())
+                string packagePath = useLocalUpdate
+                    ? localPackage
                     : PluginUpdateService.DownloadPackage(
                         latestManifest,
                         Path.Combine(Path.GetTempPath(), "DocuLint-updates"),
@@ -353,10 +423,10 @@ namespace DocuLint
 
         private void SaveSettings()
         {
-            Properties.Settings.Default.UpdateLocalFolder = localFolderBox.Text.Trim();
+            Properties.Settings.Default.UpdateLocalPackage = localPackageBox.Text.Trim();
             Properties.Settings.Default.Save();
         }
 
-        private static string GetLocalFolder() => Properties.Settings.Default.UpdateLocalFolder ?? string.Empty;
+        private static string GetLocalPackage() => Properties.Settings.Default.UpdateLocalPackage ?? string.Empty;
     }
 }

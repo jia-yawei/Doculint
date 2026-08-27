@@ -98,9 +98,9 @@ namespace DocuLint.Properties {
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("")]
-        public string UpdateLocalFolder {
-            get { return ((string)(this["UpdateLocalFolder"])); }
-            set { this["UpdateLocalFolder"] = value; }
+        public string UpdateLocalPackage {
+            get { return ((string)(this["UpdateLocalPackage"])); }
+            set { this["UpdateLocalPackage"] = value; }
         }
 
     }
