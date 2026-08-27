@@ -48,26 +48,14 @@ scripts/                     开发辅助脚本
 
 也可以在 Visual Studio 中打开 `DocuLint/DocuLint.slnx`，选择 `Debug` 或 `Release` 后构建。调试启动会打开 Word 并加载插件；目标电脑需要安装对应的 Office 和 VSTO Runtime。
 
-## 更新源
+## 更新插件
 
-GitHub 更新源已内置，不需要在插件中手动填写仓库地址：
+在功能区“关于”菜单中点击“检查更新”，可选择两种方式：
 
-```text
-https://raw.githubusercontent.com/jia-yawei/Doculint/main/update/latest.json
-```
+- 网络更新：选择“网络更新”后点击“检查更新”，发现新版本时点击“安装更新”。
+- 本地更新：选择“本地更新”，点击“浏览”选择独立安装包 `.exe` 或 `.msi` 文件，再点击“检查更新”和“安装更新”。本地安装包文件名需包含版本号，例如 `DocuLint-0.0.2.0-setup.exe`。
 
-内网发布时，可在更新窗口中选择包含 `latest.json` 和安装包的文件夹。清单至少包含版本号、安装包地址或文件名，示例：
-
-```json
-{
-  "Version": "0.0.1.7",
-  "ReleaseDate": "2026-08-21",
-  "Notes": "修复问题，优化功能",
-  "PackageUrl": "https://example.com/DocuLint.vsto",
-  "PackageFileName": "DocuLint.vsto",
-  "Sha256": "安装包SHA256值"
-}
-```
+安装完成后请重新打开 Word。
 
 ## 使用注意
 

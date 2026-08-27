@@ -183,7 +183,6 @@ namespace DocuLint
             this.btnDocumentVersions.OfficeImageId = "VersionHistory";
             this.btnDocumentVersions.ScreenTip = "管理当前文档版本";
             this.btnDocumentVersions.ShowImage = true;
-            this.btnDocumentVersions.Visible = false;
             this.btnDocumentVersions.SuperTip = "保存当前文档快照，查看历史版本及与当前版本的差异。";
             this.btnDocumentVersions.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnDocumentVersions_Click);
             //
@@ -513,7 +512,6 @@ namespace DocuLint
             this.btnCommonPhrases.OfficeImageId = "Paste";
             this.btnCommonPhrases.ScreenTip = "显示常用语";
             this.btnCommonPhrases.ShowImage = true;
-            this.btnCommonPhrases.Visible = false;
             this.btnCommonPhrases.SuperTip = "打开常用语侧边栏，选择后插入当前光标位置；候选补全快捷键可在插件配置中设置。";
             this.btnCommonPhrases.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnCommonPhrases_Click);
             //
@@ -694,7 +692,7 @@ namespace DocuLint
             // btnHelpVersion
             // 
             this.btnHelpVersion.Enabled = false;
-            this.btnHelpVersion.Label = "版本号：0.0.1.7";
+            this.btnHelpVersion.Label = "版本号：0.0.2.0";
             this.btnHelpVersion.Name = "btnHelpVersion";
             this.btnHelpVersion.OfficeImageId = "Info";
             this.btnHelpVersion.ShowImage = true;
@@ -721,7 +719,6 @@ namespace DocuLint
             this.btnPluginSettings.OfficeImageId = "Settings";
             this.btnPluginSettings.ScreenTip = "插件配置";
             this.btnPluginSettings.ShowImage = true;
-            this.btnPluginSettings.Visible = false;
             this.btnPluginSettings.SuperTip = "配置常用语补全、图片题注和表格题注快捷键。";
             this.btnPluginSettings.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnPluginSettings_Click);
             //
