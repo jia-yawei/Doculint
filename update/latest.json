@@ -1,1 +1,8 @@
-{"Version":"0.0.1.8","ReleaseDate":"2026-08-27","Notes":"临时测试版本，用于验证 0.0.1.7 到 0.0.1.8 的在线检查、下载和安装流程。","PackageUrl":"https://raw.githubusercontent.com/jia-yawei/Doculint/main/update/DocuLint-0.0.1.8-setup.exe","PackageFileName":"DocuLint-0.0.1.8-setup.exe","Sha256":"FABAA484562EE09069A5D9DE11B4F17723D0E06DD1FB270E1C1F4E27C64C3381"}
+{
+  "Version": "0.0.1.8",
+  "ReleaseDate": "2026-08-27",
+  "Notes": "临时测试版本，用于验证 0.0.1.7 到 0.0.1.8 的在线检查、下载和安装流程。",
+  "PackageUrl": "https://raw.githubusercontent.com/jia-yawei/Doculint/main/update/DocuLint-0.0.1.8-setup.exe",
+  "PackageFileName": "DocuLint-0.0.1.8-setup.exe",
+  "Sha256": "FABAA484562EE09069A5D9DE11B4F17723D0E06DD1FB270E1C1F4E27C64C3381"
+}
