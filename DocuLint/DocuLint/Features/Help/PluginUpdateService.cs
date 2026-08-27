@@ -34,8 +34,8 @@ namespace DocuLint
             "https://cdn.jsdelivr.net/gh/jia-yawei/Doculint@main/";
         private static readonly string[] DefaultManifestUrls =
         {
-            JsDelivrContentPrefix + "update/latest.json",
-            RawGitHubContentPrefix + "update/latest.json"
+            RawGitHubContentPrefix + "update/latest.json",
+            JsDelivrContentPrefix + "update/latest.json"
         };
         private const int ConnectionTimeoutMilliseconds = 10000;
         private const int ReadWriteTimeoutMilliseconds = 30000;
