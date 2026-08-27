@@ -27,7 +27,10 @@ namespace DocuLint
             {
                 try
                 {
-                    return (Properties.Settings.Default.CommonPhraseLibraryPath ?? string.Empty).Trim();
+                    string configuredPath = (Properties.Settings.Default.CommonPhraseLibraryPath ?? string.Empty).Trim();
+                    return !string.IsNullOrWhiteSpace(configuredPath) && File.Exists(configuredPath)
+                        ? configuredPath
+                        : PluginDataStore.CommonPhrasesPath;
                 }
                 catch
                 {

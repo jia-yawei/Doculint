@@ -315,10 +315,7 @@ namespace DocuLint
 
         private void SelectPhraseLibrary()
         {
-            string defaultLibraryPath = Path.Combine(
-                AppDomain.CurrentDomain.BaseDirectory,
-                "resource",
-                "common-phrases.default.json");
+            string defaultLibraryPath = PluginDataStore.CommonPhrasesPath;
             using (OpenFileDialog dialog = new OpenFileDialog
             {
                 Title = "加载常用语库",

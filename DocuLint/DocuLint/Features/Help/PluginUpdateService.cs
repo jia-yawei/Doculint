@@ -200,7 +200,9 @@ namespace DocuLint
                         ? Path.GetFileName(new Uri(packageUrl).LocalPath)
                         : manifest.PackageFileName;
                     string target = Path.Combine(targetFolder, string.IsNullOrWhiteSpace(name) ? "DocuLint-update.vsto" : name);
-                    DownloadPackageFile(packageUrl, target, progress);
+                    // The package URL can point to a file that was replaced in the
+                    // repository. Bypass the raw-content CDN cache before hashing it.
+                    DownloadPackageFile(AddCacheBuster(packageUrl), target, progress);
 
                     if (!VerifySha256(target, manifest.Sha256))
                     {

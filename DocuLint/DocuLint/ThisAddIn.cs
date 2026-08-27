@@ -77,6 +77,7 @@ namespace DocuLint
         private void ThisAddIn_Startup(object sender, System.EventArgs e)
         {
             uiSynchronizationContext = Threading.SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+            PluginDataStore.EnsureDefaultFiles();
             Ribbon1.EnableCommonPhraseShortcutHook();
             commonPhraseHotKeyWindow = new CommonPhraseHotKeyWindow(this);
             if (!commonPhraseHotKeyWindow.Register())

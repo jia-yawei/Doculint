@@ -452,21 +452,20 @@ namespace DocuLint
 
         private static void OpenStandardsFolder()
         {
-            const string packagedRelativePath = "Help\\Standards";
-            const string developmentSourcePath = "E:\\jiayawei\\标准\\GJB\\A3，31-GJB438C软件开发文档全套模板word 软件开发相关标准 GJB438B模板\\（2）GJB 软件相关标准（共18份）\\GJB 438C-2021《军用软件开发文档通用要求》.pdf";
-
-            string packagedFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, packagedRelativePath);
-            string sourceFolder = Path.GetDirectoryName(developmentSourcePath);
-            string folder = Directory.Exists(packagedFolder) ? packagedFolder : sourceFolder;
-            if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+            string standardPath = PluginDataStore.StandardPath;
+            if (!File.Exists(standardPath))
             {
-                MessageBox.Show("未找到标准文件夹，请确认插件资源完整。", "查看标准", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(
+                    "未找到标准文件，请将 GJB438C.pdf 放入以下目录：\r\n" + PluginDataStore.StandardsFolder,
+                    "查看标准",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
                 return;
             }
 
             try
             {
-                Process.Start("explorer.exe", "\"" + folder + "\"");
+                Process.Start("explorer.exe", "\"" + PluginDataStore.StandardsFolder + "\"");
             }
             catch (Exception ex)
             {
