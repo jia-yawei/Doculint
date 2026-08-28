@@ -9,6 +9,8 @@ namespace DocuLint
         private readonly TextBox commonPhraseShortcutBox;
         private readonly TextBox imageCaptionShortcutBox;
         private readonly TextBox tableCaptionShortcutBox;
+        private readonly TextBox standardLibraryDirectoryBox;
+        private readonly bool requireStandardLibraryDirectory;
 
         internal string CommonPhraseShortcut => commonPhraseShortcutBox.Text.Trim();
 
@@ -16,11 +18,15 @@ namespace DocuLint
 
         internal string InsertTableCaptionShortcut => tableCaptionShortcutBox.Text.Trim();
 
+        internal string StandardLibraryDirectory => standardLibraryDirectoryBox.Text.Trim();
+
         internal PluginSettingsForm(
             string commonPhraseShortcut,
             string imageCaptionShortcut,
-            string tableCaptionShortcut)
+            string tableCaptionShortcut,
+            string standardLibraryDirectory)
         {
+            requireStandardLibraryDirectory = string.IsNullOrWhiteSpace(standardLibraryDirectory);
             Text = "插件配置";
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -30,19 +36,20 @@ namespace DocuLint
             AutoScaleMode = AutoScaleMode.Dpi;
             AutoScaleDimensions = new SizeF(96F, 96F);
             Font = new Font("Microsoft YaHei UI", 9F);
-            ClientSize = new Size(560, 245);
+            ClientSize = new Size(640, 370);
+            MinimumSize = new Size(640, 370);
 
             TableLayoutPanel layout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 4,
-                RowCount = 5,
+                ColumnCount = 3,
+                RowCount = 6,
                 Padding = new Padding(16),
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 132F));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 72F));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 72F));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 84F));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -51,13 +58,13 @@ namespace DocuLint
 
             Label title = new Label
             {
-                Text = "插件快捷键",
+                Text = "插件快捷键与标准资料",
                 AutoSize = true,
                 Font = new Font(Font, FontStyle.Bold),
                 Margin = new Padding(0, 0, 0, 12)
             };
             layout.Controls.Add(title, 0, 0);
-            layout.SetColumnSpan(title, 4);
+            layout.SetColumnSpan(title, 3);
 
             commonPhraseShortcutBox = AddShortcutRow(
                 layout,
@@ -66,6 +73,7 @@ namespace DocuLint
                 commonPhraseShortcut);
             imageCaptionShortcutBox = AddShortcutRow(layout, 2, "插入图片题注", imageCaptionShortcut);
             tableCaptionShortcutBox = AddShortcutRow(layout, 3, "插入表格题注", tableCaptionShortcut);
+            standardLibraryDirectoryBox = AddStandardLibraryRow(layout, 4, standardLibraryDirectory);
 
             FlowLayoutPanel buttons = new FlowLayoutPanel
             {
@@ -87,18 +95,35 @@ namespace DocuLint
                 Text = "保存",
                 AutoSize = true,
                 MinimumSize = new Size(76, 30),
-                DialogResult = DialogResult.OK
             };
             saveButton.Click += (_, __) =>
             {
                 commonPhraseShortcutBox.Text = PluginShortcutService.Normalize(commonPhraseShortcutBox.Text);
                 imageCaptionShortcutBox.Text = PluginShortcutService.Normalize(imageCaptionShortcutBox.Text);
                 tableCaptionShortcutBox.Text = PluginShortcutService.Normalize(tableCaptionShortcutBox.Text);
+                if (string.IsNullOrWhiteSpace(StandardLibraryDirectory))
+                {
+                    MessageBox.Show(
+                        requireStandardLibraryDirectory
+                            ? "首次使用前请先指定标准文件夹。"
+                            : "请指定标准文件夹。",
+                        "插件配置",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
+                if (!System.IO.Directory.Exists(StandardLibraryDirectory))
+                {
+                    MessageBox.Show("指定的标准文件夹不存在，请重新选择。", "插件配置", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                DialogResult = DialogResult.OK;
             };
             buttons.Controls.Add(cancelButton);
             buttons.Controls.Add(saveButton);
-            layout.Controls.Add(buttons, 0, 4);
-            layout.SetColumnSpan(buttons, 4);
+            layout.Controls.Add(buttons, 0, 5);
+            layout.SetColumnSpan(buttons, 3);
             Controls.Add(layout);
             AcceptButton = saveButton;
             CancelButton = cancelButton;
@@ -149,19 +174,53 @@ namespace DocuLint
                 Margin = new Padding(0, 4, 4, 4)
             };
             clearButton.Click += (_, __) => box.Clear();
-            Label hint = new Label
-            {
-                Text = "按键",
-                AutoSize = true,
-                Anchor = AnchorStyles.Left,
-                ForeColor = Color.FromArgb(100, 107, 118),
-                Margin = new Padding(4, 7, 0, 7)
-            };
-
             layout.Controls.Add(label, 0, row);
             layout.Controls.Add(box, 1, row);
             layout.Controls.Add(clearButton, 2, row);
-            layout.Controls.Add(hint, 3, row);
+            return box;
+        }
+
+        private TextBox AddStandardLibraryRow(TableLayoutPanel layout, int row, string directory)
+        {
+            Label label = new Label
+            {
+                Text = "标准文件夹",
+                AutoSize = true,
+                Anchor = AnchorStyles.Left,
+                Margin = new Padding(0, 7, 8, 7)
+            };
+            TextBox box = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Text = directory ?? string.Empty,
+                Margin = new Padding(0, 4, 8, 4)
+            };
+            Button browseButton = new Button
+            {
+                Text = "浏览...",
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0, 4, 4, 4)
+            };
+            browseButton.Click += (_, __) =>
+            {
+                using (FolderBrowserDialog dialog = new FolderBrowserDialog())
+                {
+                    dialog.Description = "选择存放软件开发标准文件的文件夹";
+                    dialog.ShowNewFolderButton = false;
+                    if (System.IO.Directory.Exists(box.Text))
+                    {
+                        dialog.SelectedPath = box.Text;
+                    }
+
+                    if (dialog.ShowDialog(this) == DialogResult.OK)
+                    {
+                        box.Text = dialog.SelectedPath;
+                    }
+                }
+            };
+            layout.Controls.Add(label, 0, row);
+            layout.Controls.Add(box, 1, row);
+            layout.Controls.Add(browseButton, 2, row);
             return box;
         }
     }

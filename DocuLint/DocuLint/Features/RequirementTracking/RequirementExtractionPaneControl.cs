@@ -972,8 +972,10 @@ namespace DocuLint
 
         internal void OpenExtractionSettings()
         {
-            Word.Document doc = currentDocument ?? applicationAccessor?.Invoke()?.ActiveDocument;
-            DocumentMarkerDocumentType currentDocumentType = GetEffectivePresetTemplateType(doc);
+            // Type detection inspects document paragraphs, so defer it until extraction actually runs.
+            DocumentMarkerDocumentType currentDocumentType = extractionPresetTemplateType == DocumentMarkerDocumentType.Unknown
+                ? DocumentMarkerDocumentType.RequirementSpecification
+                : extractionPresetTemplateType;
             using (RequirementExtractionSettingsForm form = new RequirementExtractionSettingsForm(
                 currentDocumentType,
                 extractionPresetTemplateType,

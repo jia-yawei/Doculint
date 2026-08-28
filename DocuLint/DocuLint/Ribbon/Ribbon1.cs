@@ -452,20 +452,25 @@ namespace DocuLint
 
         private static void OpenStandardsFolder()
         {
-            string standardPath = PluginDataStore.StandardPath;
-            if (!File.Exists(standardPath))
+            string standardsDirectory = PluginDataStore.GetStandardLibraryDirectory();
+            if (string.IsNullOrWhiteSpace(standardsDirectory) || !Directory.Exists(standardsDirectory))
             {
                 MessageBox.Show(
-                    "未找到标准文件，请将 GJB438C.pdf 放入以下目录：\r\n" + PluginDataStore.StandardsFolder,
+                    "首次使用“查看标准”前，请先在插件配置中指定标准文件夹。",
                     "查看标准",
                     MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-                return;
+                    MessageBoxIcon.Information);
+                Globals.ThisAddIn?.OpenPluginSettings();
+                standardsDirectory = PluginDataStore.GetStandardLibraryDirectory();
+                if (string.IsNullOrWhiteSpace(standardsDirectory) || !Directory.Exists(standardsDirectory))
+                {
+                    return;
+                }
             }
 
             try
             {
-                Process.Start("explorer.exe", "\"" + PluginDataStore.StandardsFolder + "\"");
+                Process.Start("explorer.exe", "\"" + standardsDirectory + "\"");
             }
             catch (Exception ex)
             {

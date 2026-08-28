@@ -669,7 +669,7 @@ namespace DocuLint
             this.btnStandardReading.OfficeImageId = "FileOpen";
             this.btnStandardReading.ScreenTip = "查看标准";
             this.btnStandardReading.ShowImage = true;
-            this.btnStandardReading.SuperTip = "打开软件开发相关标准文件夹。";
+            this.btnStandardReading.SuperTip = "打开插件配置的标准文件夹；首次使用时需要先指定文件夹。";
             this.btnStandardReading.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnStandardReading_Click);
             // 
             // group8
@@ -719,7 +719,7 @@ namespace DocuLint
             this.btnPluginSettings.OfficeImageId = "Settings";
             this.btnPluginSettings.ScreenTip = "插件配置";
             this.btnPluginSettings.ShowImage = true;
-            this.btnPluginSettings.SuperTip = "配置常用语补全、图片题注和表格题注快捷键。";
+            this.btnPluginSettings.SuperTip = "配置标准文件夹，以及常用语补全、图片题注和表格题注快捷键。";
             this.btnPluginSettings.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnPluginSettings_Click);
             //
             // Ribbon1

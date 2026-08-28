@@ -311,7 +311,7 @@ namespace DocuLint
 
         internal void ShowRequirementExtractionPane()
         {
-            EnsureRequirementExtractionPane();
+            EnsureRequirementExtractionPane(true);
             if (requirementExtractionPaneControl == null || requirementExtractionTaskPane == null)
             {
                 return;
@@ -344,7 +344,7 @@ namespace DocuLint
             }
         }
 
-        internal void OpenPluginSettings()
+        internal bool OpenPluginSettings()
         {
             commonPhraseHotKeyWindow?.Suspend();
             try
@@ -352,17 +352,20 @@ namespace DocuLint
                 using (PluginSettingsForm form = new PluginSettingsForm(
                     Properties.Settings.Default.CommonPhraseShortcut,
                     Properties.Settings.Default.InsertImageCaptionShortcut,
-                    Properties.Settings.Default.InsertTableCaptionShortcut))
+                    Properties.Settings.Default.InsertTableCaptionShortcut,
+                    PluginDataStore.GetStandardLibraryDirectory()))
                 {
                     if (form.ShowDialog() != DialogResult.OK)
                     {
-                        return;
+                        return false;
                     }
 
                     Properties.Settings.Default.CommonPhraseShortcut = PluginShortcutService.Normalize(form.CommonPhraseShortcut);
                     Properties.Settings.Default.InsertImageCaptionShortcut = PluginShortcutService.Normalize(form.InsertImageCaptionShortcut);
                     Properties.Settings.Default.InsertTableCaptionShortcut = PluginShortcutService.Normalize(form.InsertTableCaptionShortcut);
+                    PluginDataStore.SaveStandardLibraryDirectory(form.StandardLibraryDirectory);
                     Properties.Settings.Default.Save();
+                    return true;
                 }
             }
             finally
@@ -558,7 +561,8 @@ namespace DocuLint
 
         internal void OpenRequirementExtractionSettings()
         {
-            EnsureRequirementExtractionPane();
+            // Opening settings does not require loading or restoring the document's extracted items.
+            EnsureRequirementExtractionPane(false);
             if (requirementExtractionPaneControl == null)
             {
                 return;
@@ -699,7 +703,7 @@ namespace DocuLint
             SetActiveRequirementTrackingPane(null);
         }
 
-        private void EnsureRequirementExtractionPane()
+        private void EnsureRequirementExtractionPane(bool loadSavedRequirements = true)
         {
             Word.Window activeWindow = null;
             Word.Document activeDocument = null;
@@ -731,6 +735,7 @@ namespace DocuLint
                     StringComparison.OrdinalIgnoreCase))
                 {
                     SetActiveRequirementExtractionPane(existingContext);
+                    EnsureRequirementExtractionItemsLoaded(existingContext, loadSavedRequirements);
                     return;
                 }
 
@@ -739,7 +744,6 @@ namespace DocuLint
 
             RequirementExtractionPaneControl control =
                 new RequirementExtractionPaneControl(() => Application);
-            control.LoadSavedRequirementsFromCurrentDocument();
             control.RequirementActivated += NavigateToStart;
             control.BatchExtractionModeChanged += enabled =>
             {
@@ -772,6 +776,20 @@ namespace DocuLint
                 HandleRequirementExtractionPaneVisibleChanged(context);
             requirementExtractionPanes[windowKey] = context;
             SetActiveRequirementExtractionPane(context);
+            EnsureRequirementExtractionItemsLoaded(context, loadSavedRequirements);
+        }
+
+        private static void EnsureRequirementExtractionItemsLoaded(
+            RequirementExtractionPaneContext context,
+            bool loadSavedRequirements)
+        {
+            if (!loadSavedRequirements || context == null || context.RequirementsLoaded)
+            {
+                return;
+            }
+
+            context.Control?.LoadSavedRequirementsFromCurrentDocument();
+            context.RequirementsLoaded = true;
         }
 
         private static int GetInitialTaskPaneWidth(double screenRatio, int minimum, int maximum)
@@ -1804,6 +1822,7 @@ namespace DocuLint
             internal string DocumentKey { get; set; }
             internal RequirementExtractionPaneControl Control { get; set; }
             internal CustomTaskPane TaskPane { get; set; }
+            internal bool RequirementsLoaded { get; set; }
             internal bool Removing { get; set; }
         }
 
